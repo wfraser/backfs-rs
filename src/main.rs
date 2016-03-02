@@ -29,6 +29,8 @@ use backfs::BackFS;
 extern crate libc;
 use libc::*;
 
+extern crate time;
+
 extern crate fuse;
 
 fn main() {    
