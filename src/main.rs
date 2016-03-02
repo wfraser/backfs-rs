@@ -36,6 +36,11 @@ extern crate fuse;
 fn main() {    
     let args = env::args().collect::<Vec<String>>();
     let mut settings = BackfsSettings::parse(&args);
+
+    if settings.cache.is_empty() {
+        println!("Error: cache directory not specified. Use the '-o cache=<directory>' option.");
+        settings.help = true;
+    }
     
     if settings.verbose {
         println!("{:?}", settings);
