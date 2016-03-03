@@ -53,7 +53,7 @@ fn main() {
     }
 
     if settings.version {
-        println!("BackFS version: 0.1.0");
+        print!("{}", backfs::BACKFS_VERSION);
         settings.fuse_options.push("--version");
         settings.mount_point = ".";  // placate the mount call
     }

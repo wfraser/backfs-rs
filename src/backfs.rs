@@ -3,21 +3,53 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
+use std::cmp;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::rc::Rc;
+use std::str;
 
 use arg_parse::BackfsSettings;
 use inodetable::InodeTable;
 
-use fuse::{FileType, FileAttr, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request};
+use fuse::{FileType, FileAttr, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyWrite, Request};
 use libc::*;
 use time::Timespec;
 
+pub const BACKFS_VERSION: &'static str = "BackFS version: 0.1.0\n";
+
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
+
+// inode 2:
+const BACKFS_CONTROL_FILE_NAME: &'static str = ".backfs_control";
+const BACKFS_CONTROL_FILE_PATH: &'static str = "/.backfs_control";
+
+// inode 3:
+const BACKFS_VERSION_FILE_NAME: &'static str = ".backfs_version";
+const BACKFS_VERSION_FILE_PATH: &'static str = "/.backfs_version";
+
+const BACKFS_CONTROL_FILE_HELP: &'static str = "commands: test, noop\n";
+
+const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
+    ino: 0,
+    size: 0,
+    blocks: 0,
+    atime: Timespec { sec: 0, nsec: 0 },
+    mtime: Timespec { sec: 0, nsec: 0 },
+    ctime: Timespec { sec: 0, nsec: 0 },
+    crtime: Timespec { sec: 0, nsec: 0 },
+    kind: FileType::RegularFile,
+    perm: 0o000,
+    nlink: 1,
+    uid: 0,
+    gid: 0,
+    rdev: 0,
+    flags: 0,
+};
 
 pub struct BackFS<'a> {
     pub settings: BackfsSettings<'a>,
@@ -42,6 +74,26 @@ fn fuse_file_type(ft: &fs::FileType) -> FileType {
         FileType::NamedPipe
     } else {
         panic!("unknown file type");
+    }
+}
+
+fn backfs_fake_file_attr(path: Option<&str>) -> Option<FileAttr> {
+    match path {
+        Some(BACKFS_CONTROL_FILE_PATH) => {
+            let mut attr = BACKFS_FAKE_FILE_ATTRS.clone();
+            attr.ino = 2;
+            attr.perm = 0o600;
+            attr.size = BACKFS_CONTROL_FILE_HELP.as_bytes().len() as u64;
+            Some(attr)
+        },
+        Some(BACKFS_VERSION_FILE_PATH) => {
+            let mut attr = BACKFS_FAKE_FILE_ATTRS.clone();
+            attr.ino = 3;
+            attr.perm = 0o444;
+            attr.size = BACKFS_VERSION.as_bytes().len() as u64;
+            Some(attr)
+        },
+        _ => None
     }
 }
 
@@ -90,12 +142,41 @@ impl<'a> BackFS<'a> {
             flags: 0,
         })
     }
+
+    fn backfs_control_file_write(&mut self, data: &[u8], reply: ReplyWrite) {
+        // remove a trailing newline if it exists
+        let data_trimmed = if data.last() == Some(&0x0A) {
+            &data[..data.len() - 1]
+        } else {
+            data
+        };
+
+        let first_space = data_trimmed.iter().position(|x| *x == 0x20).unwrap_or(data_trimmed.len());
+        let (command_bytes, arg_bytes) = data_trimmed.split_at(first_space);
+        let command = str::from_utf8(command_bytes).unwrap_or("[invalid utf8]");
+
+        let arg_start = if arg_bytes.is_empty() { 0 } else { 1 }; // skip over the space delimiter if there is one
+        let arg = OsStr::from_bytes(&arg_bytes[arg_start..]);
+
+        self.log(format!("command: {:?}, arg: {:?}", command, arg));
+
+        match command {
+            "test" => { reply.error(EXDEV); },
+            "noop" => (),
+            // TODO:
+            //"invalidate"
+            //"free_orphans"
+            _ => { reply.error(EBADMSG); }
+        }
+    }
 }
 
-impl<'a> Filesystem for BackFS<'a> {    
+impl<'a> Filesystem for BackFS<'a> {
     fn init(&mut self, _req: &Request) -> Result<(), c_int> {
         self.log(format!("init"));
         self.inode_table.add(OsString::from("/"));
+        self.inode_table.add(OsString::from(BACKFS_CONTROL_FILE_PATH));
+        self.inode_table.add(OsString::from(BACKFS_VERSION_FILE_PATH));
         Ok(())
     }
 
@@ -107,7 +188,7 @@ impl<'a> Filesystem for BackFS<'a> {
         if let Some(parent_path) = self.inode_table.get_path(parent) {
 
             // Combine the parent path and the name being looked up.
-            let pathrc = {
+            let pathrc: Rc<OsString> = {
                 let mut path = (*parent_path).clone();
                 if path.to_str() != Some("/") {
                     path.push(OsStr::new("/"));
@@ -117,6 +198,14 @@ impl<'a> Filesystem for BackFS<'a> {
             };
 
             self.log(format!("lookup: {}", pathrc.to_string_lossy()));
+
+            match backfs_fake_file_attr((*pathrc).to_str()) {
+                Some(attr) => {
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                None => ()
+            }
 
             match self.stat_real(&pathrc) {
                 Ok(attr) => {
@@ -139,6 +228,15 @@ impl<'a> Filesystem for BackFS<'a> {
             self.log(format!("getattr: {}: {}", ino, path.to_string_lossy()));
 
             let pathrc = Rc::new(path);
+
+            match backfs_fake_file_attr((*pathrc).to_str()) {
+                Some(attr) => {
+                    reply.attr(&TTL, &attr);
+                    return;
+                }
+                None => ()
+            }
+
             match self.stat_real(&pathrc) {
                 Ok(attr) => {
                     reply.attr(&TTL, &attr);
@@ -163,7 +261,9 @@ impl<'a> Filesystem for BackFS<'a> {
         if let Some(path) = self.inode_table.get_path(ino) {
             self.log(format!("readdir: {}", path.to_string_lossy()));
 
-            let parent_inode = if path.as_os_str() == OsStr::new("/") {
+            let is_root = ino == 1;
+
+            let parent_inode = if is_root {
                 ino
             } else {
                 let parent_path = Path::new(path.as_os_str()).parent().unwrap();
@@ -187,6 +287,13 @@ impl<'a> Filesystem for BackFS<'a> {
                     reply.add(ino, 0, FileType::Directory, ".");
                     reply.add(parent_inode, 1, FileType::Directory, "..");
                     let mut index = 2u64;
+
+                    if is_root {
+                        reply.add(2, 2, FileType::RegularFile, BACKFS_CONTROL_FILE_NAME);
+                        reply.add(3, 3, FileType::RegularFile, BACKFS_VERSION_FILE_NAME);
+                        index += 2;
+                    }
+
                     for entry_result in entries {
                         match entry_result {
                             Ok(entry) => {
@@ -237,6 +344,22 @@ impl<'a> Filesystem for BackFS<'a> {
         if let Some(path) = self.inode_table.get_path(ino) {
             self.log(format!("read: {} {}@{}", path.to_string_lossy(), size, offset));
 
+            match path.to_str() {
+                Some(BACKFS_CONTROL_FILE_PATH) => {
+                    let data = BACKFS_CONTROL_FILE_HELP.as_bytes();
+                    let end = cmp::min(data.len(), (size as usize - offset as usize));
+                    reply.data(&data[offset as usize .. end]);
+                    return;
+                },
+                Some(BACKFS_VERSION_FILE_PATH) => {
+                    let data: &[u8] = BACKFS_VERSION.as_bytes();
+                    let end = cmp::min(data.len(), (size as usize - offset as usize));
+                    reply.data(&data[offset as usize .. end]);
+                    return;
+                },
+                _ => ()
+            }
+
             // TODO
             reply.error(EHWPOISON); // "Memory page has hardware error" lol
 
@@ -245,6 +368,30 @@ impl<'a> Filesystem for BackFS<'a> {
             reply.error(ENOENT);
         }
     }
-    
+
+    fn write(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, data: &[u8], _flags: u32, reply: ReplyWrite) {
+        if let Some(path) = self.inode_table.get_path(ino) {
+            self.log(format!("write: {} {}@{}", path.to_string_lossy(), data.len(), offset));
+
+            match path.to_str() {
+                Some(BACKFS_CONTROL_FILE_PATH) => {
+                    self.backfs_control_file_write(data, reply);
+                    return;
+                },
+                Some(BACKFS_VERSION_FILE_PATH) => {
+                    reply.error(EACCES);
+                    return;
+                }
+                _ => ()
+            }
+
+            // TODO
+            reply.error(EHWPOISON);
+        } else {
+            self.log(format!("error: write: could not resolve inode {}", ino));
+            reply.error(ENOENT);
+        }
+    }
+
     // TODO: implement the rest of the syscalls needed
 }
