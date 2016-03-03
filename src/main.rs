@@ -33,7 +33,7 @@ extern crate time;
 
 extern crate fuse;
 
-fn main() {    
+fn main() {
     let args = env::args().collect::<Vec<String>>();
     let mut settings = BackfsSettings::parse(&args);
 
@@ -41,32 +41,32 @@ fn main() {
         println!("Error: cache directory not specified. Use the '-o cache=<directory>' option.");
         settings.help = true;
     }
-    
+
     if settings.verbose {
         println!("{:?}", settings);
     }
-    
+
     if settings.help {
         println!("{}\nFUSE options:", arg_parse::USAGE);
         settings.fuse_options.push("--help");
         settings.mount_point = ".";  // placate the mount call
     }
-    
+
     if settings.version {
         println!("BackFS version: 0.1.0");
         settings.fuse_options.push("--version");
         settings.mount_point = ".";  // placate the mount call
     }
-    
+
     if settings.foreground {
         // have FUSE automatically unmount when the process exits.
         settings.fuse_options.push("auto_unmount");
     }
-    
+
     let mut fuse_args: Vec<OsString> = vec![];
     if settings.fuse_options.len() > 0 {
         let mut fuse_options = "".to_string();
-        
+
         for option in settings.fuse_options.iter() {
             if option.starts_with("-") {
                 fuse_args.push(OsString::from(option));
@@ -77,17 +77,17 @@ fn main() {
                 fuse_options.push_str(option);
             }
         }
-        
+
         if !fuse_options.is_empty() {
             fuse_args.push(OsString::from("-o"));
             fuse_args.push(OsString::from(fuse_options));
         }
     }
-    
+
     let mountpoint = Path::new(settings.mount_point);
-    
+
     let backfs = BackFS::new(settings);
-    
+
     // TODO: need to fork to background before doing this, unless backfs.settings.foreground is specified.
     fuse::mount(backfs, &mountpoint, &fuse_args.as_deref()[..]);
 }
