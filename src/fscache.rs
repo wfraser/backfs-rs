@@ -82,70 +82,69 @@ impl FSCache {
     fn get_cache_used_size(&mut self) -> io::Result<u64> {
         let mut size = 0u64;
 
-        match fs::read_dir(Path::new(&self.buckets_dir)) {
-            Ok(readdir) => {
-                for entry_result in readdir {
-                    match entry_result {
-                        Ok(entry) => {
-                            match entry.file_type() {
-                                Ok(ft) => {
-                                    if !ft.is_dir() {
-                                        continue;
-                                    }
-                                },
-                                Err(e) => {
-                                    log!(self, "error getting file type of {:?}: {}",
-                                               entry.file_name(), e);
-                                    return Err(e);
-                                }
-                            }
-
-                            if let Some(name) = entry.file_name().to_str() {
-                                if !name.parse::<u64>().is_ok() {
-                                    continue;
-                                }
-                            }
-
-                            let mut path: OsString = self.buckets_dir.clone();
-                            path.push(&OsString::from("/"));
-                            path.push(entry.file_name());
-                            path.push(&OsString::from("/data"));
-                            log!(self, "checking {:?}", path);
-
-                            let len: u64;
-                            match fs::File::open(&path) {
-                                Ok(file) => {
-                                    match file.metadata() {
-                                        Ok(metadata) => {
-                                            len = metadata.len();
-                                        },
-                                        Err(e) => {
-                                            log!(self, "failed to get data file metadata: {}", e);
-                                            return Err(e);
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    log!(self, "failed to open data file: {}", e);
-                                    return Err(e);
-                                }
-                            }
-
-                            log!(self, "bucket {}: {} bytes", entry.file_name().to_string_lossy(), len);
-
-                            size += len;
-                        },
-                        Err(e) => {
-                            log!(self, "error reading directory entry: {}", e);
-                            return Err(e);
-                        }
-                    }
-                }
-            },
+        let readdir = match fs::read_dir(Path::new(&self.buckets_dir)) {
+            Ok(readdir) => readdir,
             Err(e) => {
                 log!(self, "error getting directory listing for bucket directory: {}", e);
                 return Err(e);
             }
+        };
+
+        for entry_result in readdir {
+            let entry = match entry_result {
+                Ok(entry) => entry,
+                Err(e) => {
+                    log!(self, "error reading directory entry: {}", e);
+                    return Err(e);
+                }
+            };
+
+            match entry.file_type() {
+                Ok(ft) => {
+                    if !ft.is_dir() {
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    log!(self, "error getting file type of {:?}: {}",
+                               entry.file_name(), e);
+                    return Err(e);
+                }
+            }
+
+            if let Some(name) = entry.file_name().to_str() {
+                if !name.parse::<u64>().is_ok() {
+                    continue;
+                }
+            }
+
+            let mut path: OsString = self.buckets_dir.clone();
+            path.push(&OsString::from("/"));
+            path.push(entry.file_name());
+            path.push(&OsString::from("/data"));
+            log!(self, "checking {:?}", path);
+
+            let len = match fs::File::open(&path) {
+                Ok(file) => {
+                    match file.metadata() {
+                        Ok(metadata) => {
+                            metadata.len()
+                        },
+                        Err(e) => {
+                            log!(self, "failed to get data file metadata: {}", e);
+                            return Err(e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    log!(self, "failed to open data file: {}", e);
+                    return Err(e);
+                }
+            };
+
+            log!(self, "bucket {}: {} bytes", entry.file_name().to_string_lossy(), len);
+
+            size += len;
         }
 
         log!(self, "cache used size: {} bytes", size);
