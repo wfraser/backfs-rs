@@ -22,6 +22,7 @@ mod arg_parse;
 use arg_parse::BackfsSettings;
 
 mod inodetable;
+mod fscache;
 
 mod backfs;
 use backfs::BackFS;

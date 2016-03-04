@@ -42,7 +42,7 @@ pub struct BackfsSettings<'a> {
     pub backing_fs: &'a str,
     pub cache_size: u64,
     pub rw: bool,
-    pub block_size: u64,
+    pub block_size: u32,
     pub foreground: bool,
     pub verbose: bool,
 }
@@ -127,7 +127,7 @@ impl<'a> BackfsSettings<'a> {
                         Ok(n) => { settings.cache_size = n; },
                         Err(e) => { println!("invalid cache size: {}", e); }  
                     },
-                    "block_size" => match parts[1].parse::<u64>() {
+                    "block_size" => match parts[1].parse::<u32>() {
                         Ok(n) => { settings.block_size = n; },
                         Err(e) => { println!("invalid block size: {}", e); }  
                     },
