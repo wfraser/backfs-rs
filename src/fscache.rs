@@ -1,13 +1,25 @@
-use std::ffi::{OsStr, OsString};
+// BackFS Filesystem Cache
+//
+// Copyright (c) 2016 by William R. Fraser
+//
+
+use std::ffi::{CString, OsStr, OsString};
 use std::fmt;
-use std::fs::File;
+use std::fs;
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
+
+use libc::*;
 
 pub struct FSCache {
     cache_dir: OsString,
+    buckets_dir: OsString,
+    map_dir: OsString,
     block_size: u64,
+    used_bytes: u64,
     pub debug: bool,
 }
 
@@ -20,9 +32,125 @@ impl FSCache {
     pub fn new(cache: &str, block_size: u64) -> FSCache {
         FSCache {
             cache_dir: OsString::from(cache),
+            buckets_dir: OsString::from(String::from(cache) + "/buckets"),
+            map_dir: OsString::from(String::from(cache) + "/map"),
             block_size: block_size,
+            used_bytes: 0u64,
             debug: false,
         }
+    }
+
+    fn create_dir_and_check_access(&self, pathstr: &OsStr) -> io::Result<()> {
+        let path = Path::new(pathstr);
+        if let Err(e) = fs::create_dir(&path) {
+            // Already existing is fine.
+            if e.raw_os_error() != Some(EEXIST) {
+                log!(self, "error: unable to create {:?}: {:?}", pathstr, e);
+                return Err(e);
+            }
+        }
+
+        // Check for read, write, and execute permissions on the folder.
+        // This doesn't 100% guarantee things will work, but it will catch most common problems
+        // early, so it's still worth doing.
+        unsafe {
+            // safe because it can't have NUL bytes if we already got this far...
+            let path_c = CString::from_vec_unchecked(Vec::from(pathstr.as_bytes()));
+            if 0 != access(path_c.as_ptr(), R_OK | W_OK | X_OK) {
+                let e = io::Error::last_os_error();
+                log!(self, "error: no R/W/X access to {:?}: {}", pathstr, e);
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn init(&mut self) -> io::Result<()> {
+        try!(self.create_dir_and_check_access(&self.buckets_dir));
+        try!(self.create_dir_and_check_access(&self.map_dir));
+
+        // TODO: check and/or write 'bucket_size' marker file
+
+        // TODO: initialize FSLL
+
+        self.used_bytes = try!(self.get_cache_used_size());
+
+        Ok(())
+    }
+
+    fn get_cache_used_size(&mut self) -> io::Result<u64> {
+        let mut size = 0u64;
+
+        match fs::read_dir(Path::new(&self.buckets_dir)) {
+            Ok(readdir) => {
+                for entry_result in readdir {
+                    match entry_result {
+                        Ok(entry) => {
+                            match entry.file_type() {
+                                Ok(ft) => {
+                                    if !ft.is_dir() {
+                                        continue;
+                                    }
+                                },
+                                Err(e) => {
+                                    log!(self, "error getting file type of {:?}: {}",
+                                               entry.file_name(), e);
+                                    return Err(e);
+                                }
+                            }
+
+                            if let Some(name) = entry.file_name().to_str() {
+                                if !name.parse::<u64>().is_ok() {
+                                    continue;
+                                }
+                            }
+
+                            let mut path: OsString = self.buckets_dir.clone();
+                            path.push(&OsString::from("/"));
+                            path.push(entry.file_name());
+                            path.push(&OsString::from("/data"));
+                            log!(self, "checking {:?}", path);
+
+                            let len: u64;
+                            match fs::File::open(&path) {
+                                Ok(file) => {
+                                    match file.metadata() {
+                                        Ok(metadata) => {
+                                            len = metadata.len();
+                                        },
+                                        Err(e) => {
+                                            log!(self, "failed to get data file metadata: {}", e);
+                                            return Err(e);
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    log!(self, "failed to open data file: {}", e);
+                                    return Err(e);
+                                }
+                            }
+
+                            log!(self, "bucket {}: {} bytes", entry.file_name().to_string_lossy(), len);
+
+                            size += len;
+                        },
+                        Err(e) => {
+                            log!(self, "error reading directory entry: {}", e);
+                            return Err(e);
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                log!(self, "error getting directory listing for bucket directory: {}", e);
+                return Err(e);
+            }
+        }
+
+        log!(self, "cache used size: {} bytes", size);
+
+        Ok(size)
     }
 
     fn log(&self, args: fmt::Arguments) {
@@ -36,7 +164,7 @@ impl FSCache {
         // for now, always cache miss
         None
     }
-    
+
     fn cached_mtime(&self, _path: &OsStr) -> u64 {
         // TODO
         0
@@ -50,7 +178,7 @@ impl FSCache {
         // TODO
     }
 
-    pub fn fetch(&self, path: &OsStr, offset: u64, size: u64, file: &mut File) -> io::Result<Vec<u8>> {
+    pub fn fetch(&self, path: &OsStr, offset: u64, size: u64, file: &mut fs::File) -> io::Result<Vec<u8>> {
         let mtime = try!(file.metadata()).mtime() as u64;
 
         if self.cached_mtime(path) != mtime {

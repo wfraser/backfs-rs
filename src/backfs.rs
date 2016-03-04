@@ -200,6 +200,18 @@ impl<'a> Filesystem for BackFS<'a> {
         self.inode_table.add(OsString::from("/"));
         self.inode_table.add(OsString::from(BACKFS_CONTROL_FILE_PATH));
         self.inode_table.add(OsString::from(BACKFS_VERSION_FILE_PATH));
+
+        if let Err(e) = self.fscache.init() {
+            log!(self, "error: failed to initialize cache");
+
+            // Returning this error doesn't seem to do anything:
+            //return Err(e.raw_os_error().unwrap());
+
+            // So let's panic instead.
+            panic!(format!("{}", e));
+        }
+
+        log!(self, "ready");
         Ok(())
     }
 
