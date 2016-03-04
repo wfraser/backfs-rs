@@ -45,7 +45,7 @@ impl FSCache {
         if let Err(e) = fs::create_dir(&path) {
             // Already existing is fine.
             if e.raw_os_error() != Some(EEXIST) {
-                log!(self, "error: unable to create {:?}: {:?}", pathstr, e);
+                log!(self, "error: unable to create {:?}: {}", pathstr, e);
                 return Err(e);
             }
         }
@@ -112,11 +112,15 @@ impl FSCache {
                 }
             }
 
-            if let Some(name) = entry.file_name().to_str() {
-                if !name.parse::<u64>().is_ok() {
-                    continue;
-                }
-            }
+            let bucket_number: u64 = match entry.file_name().to_str() {
+                Some(name) => {
+                    match name.parse::<u64>() {
+                        Ok(n) => n, // folder name parses as a number: consider it a bucket.
+                        Err(_) => { continue; }
+                    }
+                },
+                None => { continue; }
+            };
 
             let mut path: OsString = self.buckets_dir.clone();
             path.push(&OsString::from("/"));
@@ -142,7 +146,7 @@ impl FSCache {
                 }
             };
 
-            log!(self, "bucket {}: {} bytes", entry.file_name().to_string_lossy(), len);
+            log!(self, "bucket {}: {} bytes", bucket_number, len);
 
             size += len;
         }
