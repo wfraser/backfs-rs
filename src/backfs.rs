@@ -252,7 +252,7 @@ impl<'a> Filesystem for BackFS<'a> {
                     reply.entry(&TTL, &attr, 0);
                 }
                 Err(e) => {
-                    log!(self, "error: lookup: {}: {:?}", pathrc.to_string_lossy(), e);
+                    log!(self, "error: lookup: {}: {}", pathrc.to_string_lossy(), e);
                     reply.error(e.raw_os_error().unwrap_or(EIO));
                 }
             }
@@ -282,7 +282,7 @@ impl<'a> Filesystem for BackFS<'a> {
                     reply.attr(&TTL, &attr);
                 },
                 Err(e) => {
-                    log!(self, "error: getattr: inode {}, path {}: {:?}", ino, pathrc.to_string_lossy(), e);
+                    log!(self, "error: getattr: inode {}, path {}: {}", ino, pathrc.to_string_lossy(), e);
                     reply.error(e.raw_os_error().unwrap_or(EIO));
                 }
             }
@@ -362,14 +362,14 @@ impl<'a> Filesystem for BackFS<'a> {
                                 }
                             },
                             Err(e) => {
-                                log!(self, "error: readdir: {:?}", e);
+                                log!(self, "error: readdir: {}", e);
                             }
                         }
                     }
                     reply.ok();
                 },
                 Err(e) => {
-                    log!(self, "error: readdir: {}: {:?}", path.to_string_lossy(), e);
+                    log!(self, "error: readdir: {}: {}", path.to_string_lossy(), e);
                     reply.error(e.raw_os_error().unwrap_or(EIO));
                 }
             }
