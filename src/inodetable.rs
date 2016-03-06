@@ -10,7 +10,7 @@ use std::collections::btree_map::Entry::*;
 use std::ffi::OsString;
 use std::rc::Rc;
 
-type Inode = u64;
+pub type Inode = u64;
 
 pub struct InodeTable {
     map: BTreeMap<Rc<OsString>, Inode>,
