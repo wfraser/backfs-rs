@@ -189,7 +189,7 @@ impl FSCache {
         }
 
         let first_block = offset / self.block_size;
-        let last_block  = (offset + size) / self.block_size - 1;
+        let last_block  = (offset + size - 1) / self.block_size;
 
         log!(self, "fetching blocks {} to {} from {}", first_block, last_block, path.to_string_lossy());
 
