@@ -35,7 +35,7 @@ const BACKFS_CONTROL_FILE_PATH: &'static str = "/.backfs_control";
 const BACKFS_VERSION_FILE_NAME: &'static str = ".backfs_version";
 const BACKFS_VERSION_FILE_PATH: &'static str = "/.backfs_version";
 
-const BACKFS_CONTROL_FILE_HELP: &'static str = "commands: test, noop\n";
+const BACKFS_CONTROL_FILE_HELP: &'static str = "commands: test, noop, invalidate <path>\n";
 
 const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
     ino: 0,
@@ -91,14 +91,14 @@ fn backfs_fake_file_attr(path: Option<&str>) -> Option<FileAttr> {
         Some(BACKFS_CONTROL_FILE_PATH) => {
             let mut attr = BACKFS_FAKE_FILE_ATTRS.clone();
             attr.ino = 2;
-            attr.perm = 0o600;
+            attr.perm = 0o600; // -rw-------
             attr.size = BACKFS_CONTROL_FILE_HELP.as_bytes().len() as u64;
             Some(attr)
         },
         Some(BACKFS_VERSION_FILE_PATH) => {
             let mut attr = BACKFS_FAKE_FILE_ATTRS.clone();
             attr.ino = 3;
-            attr.perm = 0o444;
+            attr.perm = 0o444; // -r--r--r--
             attr.size = BACKFS_VERSION.as_bytes().len() as u64;
             Some(attr)
         },
@@ -139,6 +139,11 @@ impl<'a> BackFS<'a> {
 
         let inode = self.inode_table.add_or_get(path.clone());
 
+        let mut mode = metadata.mode() as u16;
+        if !self.settings.rw {
+            mode &= !0o222; // disable the write bit if we're not in RW mode.
+        }
+
         Ok(FileAttr {
             ino: inode,
             size: metadata.len(),
@@ -148,7 +153,7 @@ impl<'a> BackFS<'a> {
             ctime: Timespec { sec: metadata.ctime(), nsec: metadata.ctime_nsec() as i32 },
             crtime: Timespec { sec: 0, nsec: 0 },
             kind: fuse_file_type(&metadata.file_type()),
-            perm: metadata.mode() as u16,
+            perm: mode,
             nlink: metadata.nlink() as u32,
             uid: metadata.uid(),
             gid: metadata.gid(),
@@ -437,8 +442,13 @@ impl<'a> Filesystem for BackFS<'a> {
                 _ => ()
             }
 
+            if !self.settings.rw {
+                reply.error(EROFS);
+                return;
+            }
+
             // TODO
-            reply.error(EHWPOISON);
+            reply.error(ENOSYS);
         } else {
             log!(self, "error: write: could not resolve inode {}", ino);
             reply.error(ENOENT);
