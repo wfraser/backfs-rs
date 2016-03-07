@@ -6,7 +6,7 @@
 use std::ffi::{CString, OsStr, OsString};
 use std::fmt;
 use std::fs;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
@@ -24,6 +24,7 @@ pub struct FSCache {
     free_list: FSLL,
     block_size: u64,
     used_bytes: u64,
+    next_bucket_number: u64,
     pub debug: bool,
 }
 
@@ -41,6 +42,7 @@ impl FSCache {
             free_list: FSLL::new(cache, "free_head", "free_tail"),
             block_size: block_size,
             used_bytes: 0u64,
+            next_bucket_number: 0u64,
             debug: false,
         }
     }
@@ -79,6 +81,9 @@ impl FSCache {
 
         try!(self.create_dir_and_check_access(&self.buckets_dir));
         try!(self.create_dir_and_check_access(&self.map_dir));
+
+        self.next_bucket_number = try!(self.read_next_bucket_number());
+        log!(self, "next bucket number: {}", self.next_bucket_number);
 
         // TODO: check and/or write 'bucket_size' marker file
 
@@ -262,7 +267,7 @@ impl FSCache {
             }
         };
 
-        let mtime: u64 = match mtime_string.parse::<u64>() {
+        let mtime: u64 = match mtime_string.trim().parse::<u64>() {
             Ok(n) => n,
             Err(e) => {
                 log!(self, "warning: cached_mtime error parsing mtime file {:?}: {}", mtime_path, e);
@@ -271,6 +276,70 @@ impl FSCache {
         };
 
         Some(mtime)
+    }
+
+    fn get_bucket_number_file(&self) -> io::Result<File> {
+        let number_path = PathBuf::from(&self.buckets_dir).join("next_bucket_number");
+        match File::open(&number_path) {
+            Ok(file) => Ok(file),
+            Err(e) => {
+                if e.raw_os_error() == Some(ENOENT) {
+                    log!(self, "creating new next_bucket_number file");
+                    match OpenOptions::new()
+                                      .read(true)
+                                      .write(true)
+                                      .create(true)
+                                      .open(&number_path) {
+                        Ok(mut file) => {
+                            try!(write!(file, "0"));
+                            try!(file.seek(SeekFrom::Start(0)));
+                            Ok(file)
+                        },
+                        Err(e) => {
+                            log!(self, "error: get_bucket_number_file: error creating {:?}: {}", number_path, e);
+                            return Err(e);
+                        }
+                    }
+                } else {
+                    log!(self, "error: get_bucket_number_file: error opening {:?}: {}", number_path, e);
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    fn write_next_bucket_number(&self, bucket_number: u64) -> io::Result<()> {
+        let mut number_file = try!(self.get_bucket_number_file());
+        try!(number_file.set_len(0));
+        try!(write!(number_file, "{}", bucket_number));
+        Ok(())
+    }
+
+    fn read_next_bucket_number(&self) -> io::Result<u64> {
+        let mut number_file = try!(self.get_bucket_number_file());
+
+        let mut data: Vec<u8> = vec![];
+        try!(number_file.read_to_end(&mut data));
+
+        let file_string = match String::from_utf8(data) {
+            Ok(s) => s,
+            Err(e) => {
+                log!(self, "error: read_next_bucket_number: failed to interpret as string: {}", e);
+                return Err(io::Error::new(io::ErrorKind::Other, "parse error"));
+            }
+        };
+        let next_bucket_number = match file_string.trim().parse::<u64>() {
+            Ok(n) => n,
+            Err(e) => {
+                log!(self, "error: read_next_bucket_number: failed to parse file: {}", e);
+                return Err(io::Error::new(io::ErrorKind::Other, "parse error"));
+            }
+        };
+        Ok(next_bucket_number)
+    }
+
+    fn new_bucket(&mut self) -> io::Result<PathBuf> {
+        unimplemented!();
     }
 
     fn write_block_to_cache(&self, _path: &OsStr, _block: u64, _data: &[u8], _mtime: u64) {
