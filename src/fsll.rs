@@ -5,6 +5,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fmt;
+use std::fmt::Debug;
 use std::fs;
 use std::io;
 use std::os::unix;
@@ -55,10 +56,6 @@ impl FSLL {
         }
     }
 
-    fn init(&self) -> io::Result<()> {
-        Ok(())
-    }
-
     fn log(&self, args: fmt::Arguments) {
         if self.debug {
             println!("FSLL: {}", fmt::format(args));
@@ -89,9 +86,9 @@ impl FSLL {
         }
     }
 
-    fn makelink<T: AsRef<Path> + ?Sized,
-                U: AsRef<Path> + ?Sized,
-                V: AsRef<Path> + ?Sized>(
+    fn makelink<T: AsRef<Path> + ?Sized + Debug,
+                U: AsRef<Path> + ?Sized + Debug,
+                V: AsRef<Path> + ?Sized + Debug>(
                     &self,
                     path: &T,
                     link: &U,
@@ -105,25 +102,38 @@ impl FSLL {
                 unix::fs::symlink(target_path, link_path)
             },
             None => {
-                fs::remove_file(link_path)
+                let result = fs::remove_file(link_path);
+                if let Err(ref e) = result {
+                    if e.raw_os_error() != Some(ENOENT) {
+                        error!(self, "error removing link {:?}: {}", link, e);
+                    }
+                }
+
+                result
             }
         }
     }
 
-    pub fn to_head<T: AsRef<Path> + ?Sized + fmt::Debug>(&self, path: &T) -> io::Result<()> {
+    fn get_head_tail(&self, method_name: &str) -> io::Result<(PathBuf, PathBuf)> {
+        let head = match self.getlink(&self.base_dir, &self.head_link) {
+            Some(path) => path,
+            None => { error!(self, "{}: head {:?} is unset", method_name, self.head_link); }
+        };
+        let tail = match self.getlink(&self.base_dir, &self.tail_link) {
+            Some(path) => path,
+            None => { error!(self, "{}: tail {:?} is unset", method_name, self.tail_link); }
+        };
+
+        Ok((head, tail))
+    }
+
+    pub fn to_head<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
         let p: &Path = path.as_ref();
 
         // There must not be the situation where the list is empty (no head or tail yet set)
         // because this function is only for promoting an existing element to the head.
         // Use insert_as_head for the other case.
-        let head = match self.getlink(&self.base_dir, &self.head_link) {
-            Some(path) => path,
-            None => { error!(self, "in to_head, head {:?} is unset", self.head_link); }
-        };
-        let tail = match self.getlink(&self.base_dir, &self.tail_link) {
-            Some(path) => path,
-            None => { error!(self, "in to_head, tail {:?} is unset", self.tail_link); }
-        };
+        let (head, tail) = try!(self.get_head_tail("to_head"));
 
         let next = self.getlink(path, Path::new("next"));
         let prev = self.getlink(path, Path::new("prev"));
@@ -179,15 +189,97 @@ impl FSLL {
         Ok(())
     }
 
-    pub fn insert_as_head<T: AsRef<Path> + ?Sized>(&self, _path: &T) {
-        // TODO
+    pub fn insert_as_head<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
+        let maybe_head = self.getlink(&self.base_dir, &self.head_link);
+        let maybe_tail = self.getlink(&self.base_dir, &self.tail_link);
+
+        if maybe_head.is_some() && maybe_tail.is_some() {
+            let head = maybe_head.as_ref().unwrap();
+            try!(self.makelink(path, Path::new("next"), Some(head)));
+            try!(self.makelink(head, Path::new("prev"), Some(path)));
+            try!(self.makelink(&self.base_dir, &self.head_link, Some(path)));
+        } else if maybe_head.is_none() && maybe_tail.is_none() {
+            try!(self.makelink(&self.base_dir, &self.head_link, Some(path)));
+            try!(self.makelink(&self.base_dir, &self.tail_link, Some(path)));
+            try!(self.makelink(path, Path::new("next"), None::<&Path>));
+            try!(self.makelink(path, Path::new("prev"), None::<&Path>));
+        } else {
+            if maybe_head.is_some() {
+                error!(self, "list has a head {:?} but no tail!", maybe_head.unwrap());
+            } else {
+                error!(self, "list has a tail {:?} but no head!", maybe_tail.unwrap());
+            }
+        }
+
+        Ok(())
     }
 
-    pub fn insert_as_tail<T: AsRef<Path> + ?Sized>(&self, _path: &T) {
-        // TODO
+    pub fn insert_as_tail<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
+        let maybe_head = self.getlink(&self.base_dir, &self.head_link);
+        let maybe_tail = self.getlink(&self.base_dir, &self.tail_link);
+
+        if maybe_head.is_some() && maybe_tail.is_some() {
+            let tail = maybe_tail.as_ref().unwrap();
+            try!(self.makelink(path, Path::new("prev"), Some(tail)));
+            try!(self.makelink(tail, Path::new("next"), Some(path)));
+            try!(self.makelink(&self.base_dir, &self.tail_link, Some(path)));
+        } else if maybe_head.is_none() && maybe_tail.is_none() {
+            try!(self.makelink(&self.base_dir, &self.head_link, Some(path)));
+            try!(self.makelink(&self.base_dir, &self.tail_link, Some(path)));
+            try!(self.makelink(path, Path::new("next"), None::<&Path>));
+            try!(self.makelink(path, Path::new("prev"), None::<&Path>));
+        } else {
+            if maybe_head.is_some() {
+                error!(self, "list has a head {:?} but no tail!", maybe_head.unwrap());
+            } else {
+                error!(self, "list has a tail {:?} but no head!", maybe_tail.unwrap());
+            }
+        }
+
+        Ok(())
     }
 
-    pub fn disconnect<T: AsRef<Path> + ?Sized>(&self, _path: &T) {
-        // TODO
+    pub fn disconnect<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
+        let p: &Path = path.as_ref();
+
+        let (head, tail) = try!(self.get_head_tail("disconnect"));
+        let next = self.getlink(path, Path::new("next"));
+        let prev = self.getlink(path, Path::new("prev"));
+
+        if head == p {
+            if next.is_none() {
+                if tail == p {
+                    try!(self.makelink(&self.base_dir, &self.tail_link, None::<&Path>));
+                } else {
+                    error!(self, "entry has no next but is not tail: {:?}", path);
+                }
+            } else {
+                try!(self.makelink(&self.base_dir, &self.head_link, next.as_ref()));
+                try!(self.makelink(next.as_ref().unwrap(), Path::new("prev"), None::<&Path>));
+            }
+        }
+
+        if tail == p {
+            if prev.is_none() {
+                if head == p {
+                    try!(self.makelink(&self.base_dir, &self.head_link, None::<&Path>));
+                } else {
+                    error!(self, "entry has no prev but is not head: {:?}", path);
+                }
+            } else {
+                try!(self.makelink(&self.base_dir, &self.tail_link, prev.as_ref()));
+                try!(self.makelink(prev.as_ref().unwrap(), Path::new("next"), None::<&Path>));
+            }
+        }
+
+        if next.is_some() && prev.is_some() {
+            try!(self.makelink(next.as_ref().unwrap(), Path::new("prev"), prev.as_ref()));
+            try!(self.makelink(prev.as_ref().unwrap(), Path::new("next"), next.as_ref()));
+        }
+
+        try!(self.makelink(path, Path::new("next"), None::<&Path>));
+        try!(self.makelink(path, Path::new("prev"), None::<&Path>));
+
+        Ok(())
     }
 }
