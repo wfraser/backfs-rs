@@ -223,9 +223,46 @@ impl FSCache {
         }
     }
 
-    fn cached_mtime(&self, _path: &OsStr) -> u64 {
-        // TODO
-        0
+    fn cached_mtime(&self, path: &OsStr) -> Option<u64> {
+        let mut mtime_path: PathBuf = self.map_path(path);
+        mtime_path.push("mtime");
+
+        let mut mtime_file = match File::open(&mtime_path) {
+            Ok(file) => file,
+            Err(e) => {
+                if e.raw_os_error() != Some(ENOENT) {
+                    log!(self, "warning: cached_mtime error opening mtime file {:?}: {}", mtime_path, e);
+                }
+                return None;
+            }
+        };
+
+        let mut mtime_data: Vec<u8> = vec![];
+        match mtime_file.read_to_end(&mut mtime_data) {
+            Ok(nread) => (),
+            Err(e) => {
+                log!(self, "warning: cached_mtime error reading mtime file  {:?}: {}", mtime_path, e);
+                return None;
+            }
+        }
+
+        let mtime_string: String = match String::from_utf8(mtime_data) {
+            Ok(s) => s,
+            Err(e) => {
+                log!(self, "warning: cached_mtime error in mtime file {:?} data: {}", mtime_path, e);
+                return None;
+            }
+        };
+
+        let mtime: u64 = match mtime_string.parse::<u64>() {
+            Ok(n) => n,
+            Err(e) => {
+                log!(self, "warning: cached_mtime error parsing mtime file {:?}: {}", mtime_path, e);
+                return None;
+            }
+        };
+
+        Some(mtime)
     }
 
     fn write_block_to_cache(&self, _path: &OsStr, _block: u64, _data: &[u8], _mtime: u64) {
@@ -239,14 +276,18 @@ impl FSCache {
     pub fn fetch(&self, path: &OsStr, offset: u64, size: u64, file: &mut fs::File) -> io::Result<Vec<u8>> {
         let mtime = try!(file.metadata()).mtime() as u64;
 
-        if self.cached_mtime(path) != mtime {
+        let cached_mtime = self.cached_mtime(path);
+        if cached_mtime != Some(mtime) {
+            if cached_mtime.is_some() {
+                log!(self, "cached data is stale, invalidating: {:?}", path);
+            }
             self.invalidate_path(path);
         }
 
         let first_block = offset / self.block_size;
         let last_block  = (offset + size - 1) / self.block_size;
 
-        log!(self, "fetching blocks {} to {} from {}", first_block, last_block, path.to_string_lossy());
+        log!(self, "fetching blocks {} to {} from {:?}", first_block, last_block, path);
 
         if first_block != 0 {
             try!(file.seek(SeekFrom::Start(first_block * self.block_size)));
