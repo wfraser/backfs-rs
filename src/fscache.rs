@@ -5,6 +5,7 @@
 
 use std::ffi::{CString, OsStr, OsString};
 use std::fmt;
+use std::fmt::Debug;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 use libc::*;
 
 use fsll::FSLL;
+use link;
 
 pub struct FSCache {
     buckets_dir: OsString,
@@ -35,11 +37,12 @@ macro_rules! log {
 
 impl FSCache {
     pub fn new(cache: &str, block_size: u64) -> FSCache {
+        let buckets_dir = OsString::from(String::from(cache) + "/buckets");
         FSCache {
-            buckets_dir: OsString::from(String::from(cache) + "/buckets"),
+            bucket_list: FSLL::new(&buckets_dir, "head", "tail"),
+            free_list: FSLL::new(&buckets_dir, "free_head", "free_tail"),
+            buckets_dir: buckets_dir,
             map_dir: OsString::from(String::from(cache) + "/map"),
-            bucket_list: FSLL::new(cache, "head", "tail"),
-            free_list: FSLL::new(cache, "free_head", "free_tail"),
             block_size: block_size,
             used_bytes: 0u64,
             next_bucket_number: 0u64,
@@ -156,8 +159,12 @@ impl FSCache {
                     }
                 },
                 Err(e) => {
-                    log!(self, "failed to open data file: {}", e);
-                    return Err(e);
+                    if e.raw_os_error() == Some(ENOENT) {
+                        0
+                    } else {
+                        log!(self, "failed to open data file: {}", e);
+                        return Err(e);
+                    }
                 }
             };
 
@@ -280,7 +287,11 @@ impl FSCache {
 
     fn get_bucket_number_file(&self) -> io::Result<File> {
         let number_path = PathBuf::from(&self.buckets_dir).join("next_bucket_number");
-        match File::open(&number_path) {
+        //match File::open(&number_path) {
+        match OpenOptions::new()
+                          .read(true)
+                          .write(true)
+                          .open(&number_path) {
             Ok(file) => Ok(file),
             Err(e) => {
                 if e.raw_os_error() == Some(ENOENT) {
@@ -308,10 +319,45 @@ impl FSCache {
         }
     }
 
+    fn get_mtime_file<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<File> {
+        let file_path = self.map_path(path).join("mtime");
+        //match File::open(&file_path) {
+        match OpenOptions::new()
+                          .read(true)
+                          .write(true)
+                          .open(&file_path) {
+            Ok(file) => Ok(file),
+            Err(e) => {
+                if e.raw_os_error() == Some(ENOENT) {
+                    match OpenOptions::new()
+                                      .read(true)
+                                      .write(true)
+                                      .create(true)
+                                      .open(&file_path) {
+                        Ok(file) => Ok(file),
+                        Err(e) => {
+                            log!(self, "error creating mtime file {:?}: {}", file_path, e);
+                            Err(e)
+                        }
+                    }
+                } else {
+                    log!(self, "error opening mtime file {:?}: {}", file_path, e);
+                    Err(e)
+                }
+            }
+        }
+    }
+
     fn write_next_bucket_number(&self, bucket_number: u64) -> io::Result<()> {
         let mut number_file = try!(self.get_bucket_number_file());
-        try!(number_file.set_len(0));
-        try!(write!(number_file, "{}", bucket_number));
+        if let Err(e) = number_file.set_len(0) {
+            log!(self, "error truncating next_bucket_number file: {}", e);
+            return Err(e);
+        }
+        if let Err(e) = write!(number_file, "{}", bucket_number) {
+            log!(self, "error writing to next_bucket_number file: {}", e);
+            return Err(e);
+        }
         Ok(())
     }
 
@@ -338,19 +384,117 @@ impl FSCache {
         Ok(next_bucket_number)
     }
 
+    fn write_mtime(&self, path: &OsStr, mtime: u64) -> io::Result<()> {
+        let mut file = try!(self.get_mtime_file(path));
+        try!(file.seek(SeekFrom::Start(0)));
+        try!(write!(file, "{}", mtime));
+        Ok(())
+    }
+
     fn new_bucket(&mut self) -> io::Result<PathBuf> {
-        unimplemented!();
+        let bucket_path = PathBuf::from(&self.buckets_dir).join(format!("{}", self.next_bucket_number));
+        if let Err(e) = fs::create_dir(&bucket_path) {
+            log!(self, "error creating bucket directory {:?}: {}", bucket_path, e);
+            return Err(e);
+        }
+        self.next_bucket_number += 1;
+        if let Err(e) = self.write_next_bucket_number(self.next_bucket_number) {
+            log!(self, "error writing next bucket number: {}", e);
+            return Err(e);
+        }
+        if let Err(e) = self.bucket_list.insert_as_head(&bucket_path) {
+            log!(self, "error setting bucket as head of used list: {}", e);
+            return Err(e);
+        }
+        Ok(bucket_path)
     }
 
-    fn write_block_to_cache(&self, _path: &OsStr, _block: u64, _data: &[u8], _mtime: u64) {
-        // TODO
+    fn get_bucket(&mut self) -> io::Result<PathBuf> {
+        if self.free_list.is_empty() {
+            self.new_bucket()
+        } else {
+            let free_bucket: PathBuf = self.free_list.get_tail().unwrap();
+            log!(self, "re-using free bucket {:?}", free_bucket);
+            try!(self.free_list.disconnect(&free_bucket));
+            try!(self.bucket_list.insert_as_head(&free_bucket));
+            Ok(free_bucket)
+        }
     }
 
-    pub fn invalidate_path(&self, _path: &OsStr) {
-        // TODO
+    fn write_block_to_cache(&mut self, path: &OsStr, block: u64, data: &[u8], mtime: u64) {
+        let map_path = self.map_path(path);
+        if let Err(e) = fs::create_dir_all(&map_path) {
+            log!(self, "error creating map directory {:?}: {}", map_path, e);
+            return;
+        }
+
+        if let Err(e) = self.write_mtime(path, mtime) {
+            log!(self, "error writing mtime file; not writing data to cache: {}", e);
+            return;
+        }
+
+        let bucket_path: PathBuf = match self.get_bucket() {
+            Ok(path) => path,
+            Err(e) => {
+                log!(self, "error getting bucket: {}", e);
+                return;
+            }
+        };
+        let data_path = bucket_path.join("data");
+
+        let need_to_free_bucket = match OpenOptions::new()
+                                                    .write(true)
+                                                    .create(true)
+                                                    .open(&data_path) {
+            Ok(mut file) => {
+                match file.write_all(data) {
+                    Ok(()) => {
+                        match link::makelink(&map_path, &format!("{}", block), Some(&bucket_path)) {
+                            Ok(()) => false,
+                            Err(e) => {
+                                log!(self, "error symlinking cache bucket into map: {}", e);
+                                true
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        log!(self, "error writing to cache data file: {}", e);
+                        true
+                    }
+                }
+            }
+            Err(e) => {
+                log!(self, "write_block_to_cache: error opening data file {:?}: {}", data_path, e);
+                true
+            }
+        };
+
+        if need_to_free_bucket {
+            // Something went wrong; we're not going to use this bucket.
+            self.free_bucket(&bucket_path).unwrap();
+        }
     }
 
-    pub fn fetch(&self, path: &OsStr, offset: u64, size: u64, file: &mut fs::File) -> io::Result<Vec<u8>> {
+    fn free_bucket<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
+        if let Err(e) = self.bucket_list.disconnect(path) {
+            log!(self, "error disconnecting bucket from used list {:?}: {}", path, e);
+            return Err(e);
+        }
+        if let Err(e) = self.free_list.insert_as_tail(path) {
+            log!(self, "error inserting bucket into free list {:?}: {}", path, e);
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    pub fn invalidate_path(&self, path: &OsStr) {
+        let _map_path: PathBuf = self.map_path(path);
+        // TODO: walk the directory at map_path, for each symlink in it, read the link, then pass
+        // those paths to free_bucket. Remove each symlink, then remove the empty map dir (and any
+        // empty parent directories up to the map root).
+    }
+
+    pub fn fetch(&mut self, path: &OsStr, offset: u64, size: u64, file: &mut fs::File) -> io::Result<Vec<u8>> {
         let mtime = try!(file.metadata()).mtime() as u64;
 
         let cached_mtime = self.cached_mtime(path);
@@ -394,7 +538,6 @@ impl FSCache {
                         buf.truncate(nread as usize);
                     }
 
-                    // TODO: write block back to cache
                     self.write_block_to_cache(path, block, &buf, mtime);
 
                     buf

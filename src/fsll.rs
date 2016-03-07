@@ -8,10 +8,11 @@ use std::fmt;
 use std::fmt::Debug;
 use std::fs;
 use std::io;
-use std::os::unix;
 use std::path::{Path, PathBuf};
 
 use libc::*;
+
+use link;
 
 macro_rules! log {
     ($s:expr, $fmt:expr) => ($s.log(format_args!($fmt)));
@@ -43,10 +44,12 @@ pub struct FSLL {
 }
 
 impl FSLL {
-    pub fn new<T: AsRef<OsStr> + ?Sized>(
+    pub fn new<T: AsRef<OsStr> + ?Sized,
+               U: AsRef<OsStr> + ?Sized,
+               V: AsRef<OsStr> + ?Sized>(
         base_dir: &T,
-        head_link: &T,
-        tail_link: &T
+        head_link: &U,
+        tail_link: &V
     ) -> FSLL {
         FSLL {
             base_dir: OsString::from(base_dir),
@@ -86,6 +89,45 @@ impl FSLL {
         }
     }
 
+    /*
+    fn make_path_relative_to<T: AsRef<Path> + ?Sized + Debug,
+                             U: AsRef<Path> + ?Sized + Debug>(
+                                 &self,
+                                 reference: &T,
+                                 path: &U
+                             ) -> PathBuf {
+        let p: &Path = path.as_ref();
+        let mut path_adjusted = PathBuf::new();
+        let mut reference_truncated: &Path = reference.as_ref();
+        loop {
+            match p.strip_prefix(reference_truncated) {
+                Ok(stripped) => {
+                    // We found the common ancestor.
+                    for _ in stripped.components() {
+                        path_adjusted.push("..");
+                    }
+                    path_adjusted.push(stripped);
+                    break;
+                },
+                Err(_) => {
+                    // No match yet; try to back up another level.
+                    match reference_truncated.parent() {
+                        Some(ref t) => {
+                            reference_truncated = t;
+                        },
+                        None => {
+                            // We backed up all the way.
+                            path_adjusted.push(path);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        path_adjusted
+    }
+    */
+
     fn makelink<T: AsRef<Path> + ?Sized + Debug,
                 U: AsRef<Path> + ?Sized + Debug,
                 V: AsRef<Path> + ?Sized + Debug>(
@@ -94,24 +136,61 @@ impl FSLL {
                     link: &U,
                     target: Option<&V>
                 ) -> io::Result<()> {
+        log!(self, "makelink: {:?}: {:?} -> {:?}", path, link, target);
+        match link::makelink(path, link, target) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                if target.is_none() {
+                    log!(self, "error removing link {:?}/{:?}: {}", path, link, e);
+                } else {
+                    log!(self, "error creating link {:?}/{:?}: {}", path, link, e);
+                }
+                Err(e)
+            }
+        }
+
+        /*
         let mut link_path: PathBuf = path.as_ref().to_path_buf();
         link_path.push(link);
+        log!(self, "makelink: {:?} -> {:?}", link_path, target);
 
         match target {
             Some(target_path) => {
-                unix::fs::symlink(target_path, link_path)
-            },
-            None => {
-                let result = fs::remove_file(link_path);
-                if let Err(ref e) = result {
-                    if e.raw_os_error() != Some(ENOENT) {
-                        error!(self, "error removing link {:?}: {}", link, e);
+                // target is relative to the base dir. Need to fix it up to be relative to link_path.
+                let target_adjusted = self.make_relative_to(&link_path, target_path);
+                log!(self, "makelink adjusted: {:?}", target_adjusted);
+
+                match unix::fs::symlink(&target_adjusted, &link_path) {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        log!(self, "error making link {:?} -> {:?}: {}", link_path, target_adjusted, e);
+                        Err(e)
                     }
                 }
-
-                result
+            },
+            None => {
+                match fs::remove_file(link_path) {
+                    Ok(()) => Ok(()),
+                    Err(ref e) => {
+                        if e.raw_os_error() != Some(ENOENT) {
+                            error!(self, "error removing link {:?}: {}", link, e);
+                        } else {
+                            Ok(())
+                        }
+                    }
+                }
             }
         }
+        */
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.getlink(&self.base_dir, &self.head_link).is_none()
+            && self.getlink(&self.base_dir, &self.tail_link).is_none()
+    }
+
+    pub fn get_tail(&self) -> Option<PathBuf> {
+        self.getlink(&self.base_dir, &self.tail_link)
     }
 
     fn get_head_tail(&self, method_name: &str) -> io::Result<(PathBuf, PathBuf)> {
@@ -190,6 +269,9 @@ impl FSLL {
     }
 
     pub fn insert_as_head<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
+        log!(self, "insert_as_head: {:?}", path);
+        log!(self, "base_dir: {:?}", &self.base_dir);
+        log!(self, "head_link: {:?}", &self.head_link);
         let maybe_head = self.getlink(&self.base_dir, &self.head_link);
         let maybe_tail = self.getlink(&self.base_dir, &self.tail_link);
 
@@ -199,6 +281,7 @@ impl FSLL {
             try!(self.makelink(head, Path::new("prev"), Some(path)));
             try!(self.makelink(&self.base_dir, &self.head_link, Some(path)));
         } else if maybe_head.is_none() && maybe_tail.is_none() {
+            log!(self, "inserting {:?} as head and tail", path);
             try!(self.makelink(&self.base_dir, &self.head_link, Some(path)));
             try!(self.makelink(&self.base_dir, &self.tail_link, Some(path)));
             try!(self.makelink(path, Path::new("next"), None::<&Path>));

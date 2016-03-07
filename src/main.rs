@@ -21,12 +21,13 @@ impl<T: Deref> VecDeref<T> for Vec<T> {
 mod arg_parse;
 use arg_parse::BackfsSettings;
 
-mod inodetable;
-mod fscache;
-mod fsll;
-
 mod backfs;
 use backfs::BackFS;
+
+mod fscache;
+mod fsll;
+mod inodetable;
+mod link;
 
 extern crate libc;
 extern crate time;
