@@ -23,15 +23,13 @@ use arg_parse::BackfsSettings;
 
 mod inodetable;
 mod fscache;
+mod fsll;
 
 mod backfs;
 use backfs::BackFS;
 
 extern crate libc;
-use libc::*;
-
 extern crate time;
-
 extern crate fuse;
 
 fn main() {

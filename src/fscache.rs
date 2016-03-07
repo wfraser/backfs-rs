@@ -6,18 +6,22 @@
 use std::ffi::{CString, OsStr, OsString};
 use std::fmt;
 use std::fs;
+use std::fs::File;
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use libc::*;
 
+use fsll::FSLL;
+
 pub struct FSCache {
-    cache_dir: OsString,
     buckets_dir: OsString,
     map_dir: OsString,
+    bucket_list: FSLL,
+    free_list: FSLL,
     block_size: u64,
     used_bytes: u64,
     pub debug: bool,
@@ -31,9 +35,10 @@ macro_rules! log {
 impl FSCache {
     pub fn new(cache: &str, block_size: u64) -> FSCache {
         FSCache {
-            cache_dir: OsString::from(cache),
             buckets_dir: OsString::from(String::from(cache) + "/buckets"),
             map_dir: OsString::from(String::from(cache) + "/map"),
+            bucket_list: FSLL::new(cache, "head", "tail"),
+            free_list: FSLL::new(cache, "free_head", "free_tail"),
             block_size: block_size,
             used_bytes: 0u64,
             debug: false,
@@ -156,16 +161,66 @@ impl FSCache {
         Ok(size)
     }
 
+    fn map_path<S: AsRef<Path> + ?Sized>(&self, s: &S) -> PathBuf {
+        let mut map_path = PathBuf::from(&self.map_dir);
+
+        let path: &Path = s.as_ref();
+        let relative_path: &Path = if path.is_absolute() {
+            path.strip_prefix("/").unwrap()
+        } else {
+            path
+        };
+
+        map_path.push(relative_path);
+        map_path
+    }
+
     fn log(&self, args: fmt::Arguments) {
         if self.debug {
             println!("FSCache: {}", fmt::format(args));
         }
     }
 
-    fn cached_block(&self, _path: &OsStr, _block: u64) -> Option<Vec<u8>> {
-        // TODO: look up block in cache
-        // for now, always cache miss
-        None
+    fn cached_block(&self, path: &OsStr, block: u64) -> Option<Vec<u8>> {
+        let block_link_path: PathBuf = self.map_path(path)
+                                           .join(format!("{}", block));
+
+        let mut bucket_path = PathBuf::from(&block_link_path);
+        bucket_path.pop();
+
+        match fs::read_link(&block_link_path) {
+            Ok(path) => { bucket_path.push(path); },
+            Err(e) => {
+                if e.raw_os_error() != Some(ENOENT) {
+                    log!(self, "warning: cached_block error looking up {:?}: {}", block_link_path, e);
+                }
+                return None;
+            }
+        };
+        log!(self, "cached_block: bucket path: {:?}", bucket_path);
+
+        self.bucket_list.to_head(&bucket_path);
+
+        bucket_path.push("data");
+        let mut block_file: File = match File::open(&bucket_path) {
+            Ok(file) => file,
+            Err(e) => {
+                log!(self, "warning: cached_block error opening bucket data file {:?}: {}", bucket_path, e);
+                return None;
+            }
+        };
+
+        let mut data: Vec<u8> = Vec::with_capacity(self.block_size as usize);
+        match block_file.read_to_end(&mut data) {
+            Ok(nread) => {
+                log!(self, "cached_block: read {} bytes from cache", nread);
+                Some(data)
+            },
+            Err(e) => {
+                log!(self, "warning: cached_block reading from data file {:?}: {}", bucket_path, e);
+                None
+            }
+        }
     }
 
     fn cached_mtime(&self, _path: &OsStr) -> u64 {
