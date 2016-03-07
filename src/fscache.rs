@@ -5,7 +5,7 @@
 
 use std::ffi::{CString, OsStr, OsString};
 use std::fmt;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -13,6 +13,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use libc::*;
 
@@ -88,8 +89,25 @@ impl FSCache {
         self.next_bucket_number = try!(self.read_next_bucket_number());
         log!(self, "next bucket number: {}", self.next_bucket_number);
 
-        // TODO: check and/or write 'bucket_size' marker file
-
+        match self.read_number_file(&PathBuf::from(&self.buckets_dir).join("bucket_size"), Some(self.block_size)) {
+            Ok(Some(size)) => {
+                if size != self.block_size {
+                    let msg = format!(
+                        "error: block size in cache ({}) doesn't match the size in the options ({})",
+                        size,
+                        self.block_size);
+                    log!(self, "{}", msg);
+                    return Err(io::Error::new(io::ErrorKind::Other, msg));
+                }
+            },
+            Err(e) => {
+                let msg = format!("error reading bucket_size file: {}", e);
+                log!(self, "{}", msg);
+                return Err(io::Error::new(io::ErrorKind::Other, msg));
+            },
+            Ok(None) => unreachable!()
+        }
+                               
         self.used_bytes = try!(self.get_cache_used_size());
 
         Ok(())
@@ -196,14 +214,11 @@ impl FSCache {
     }
 
     fn cached_block(&self, path: &OsStr, block: u64) -> Option<Vec<u8>> {
-        let block_link_path: PathBuf = self.map_path(path)
-                                           .join(format!("{}", block));
-
         let bucket_path = match link::getlink(&self.map_path(path), &format!("{}", block)) {
             Ok(Some(path)) => { path },
             Ok(None) => { return None; }
             Err(e) => {
-                log!(self, "warning: cached_block error looking up {:?}: {}", block_link_path, e);
+                log!(self, "warning: cached_block error looking up {:?}/{}: {}", path, block, e);
                 return None;
             }
         };
@@ -236,150 +251,131 @@ impl FSCache {
         }
     }
 
-    fn cached_mtime(&self, path: &OsStr) -> Option<u64> {
-        let mut mtime_path: PathBuf = self.map_path(path);
-        mtime_path.push("mtime");
-
-        let mut mtime_file = match File::open(&mtime_path) {
-            Ok(file) => file,
-            Err(e) => {
-                if e.raw_os_error() != Some(ENOENT) {
-                    log!(self, "warning: cached_mtime error opening mtime file {:?}: {}", mtime_path, e);
-                }
-                return None;
-            }
-        };
-
-        let mut mtime_data: Vec<u8> = vec![];
-        match mtime_file.read_to_end(&mut mtime_data) {
-            Ok(_) => (),
-            Err(e) => {
-                log!(self, "warning: cached_mtime error reading mtime file  {:?}: {}", mtime_path, e);
-                return None;
-            }
-        }
-
-        let mtime_string: String = match String::from_utf8(mtime_data) {
-            Ok(s) => s,
-            Err(e) => {
-                log!(self, "warning: cached_mtime error in mtime file {:?} data: {}", mtime_path, e);
-                return None;
-            }
-        };
-
-        let mtime: u64 = match mtime_string.trim().parse::<u64>() {
-            Ok(n) => n,
-            Err(e) => {
-                log!(self, "warning: cached_mtime error parsing mtime file {:?}: {}", mtime_path, e);
-                return None;
-            }
-        };
-
-        Some(mtime)
-    }
-
-    fn get_bucket_number_file(&self) -> io::Result<File> {
-        let number_path = PathBuf::from(&self.buckets_dir).join("next_bucket_number");
+    fn open_or_create_file<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<(File, bool)> {
         match OpenOptions::new()
                           .read(true)
                           .write(true)
-                          .open(&number_path) {
-            Ok(file) => Ok(file),
-            Err(e) => {
-                if e.raw_os_error() == Some(ENOENT) {
-                    log!(self, "creating new next_bucket_number file");
-                    match OpenOptions::new()
-                                      .read(true)
-                                      .write(true)
-                                      .create(true)
-                                      .open(&number_path) {
-                        Ok(mut file) => {
-                            try!(write!(file, "0"));
-                            try!(file.seek(SeekFrom::Start(0)));
-                            Ok(file)
-                        },
-                        Err(e) => {
-                            log!(self, "error: get_bucket_number_file: error creating {:?}: {}", number_path, e);
-                            return Err(e);
-                        }
-                    }
-                } else {
-                    log!(self, "error: get_bucket_number_file: error opening {:?}: {}", number_path, e);
-                    return Err(e);
-                }
-            }
-        }
-    }
-
-    fn get_mtime_file<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<File> {
-        let file_path = self.map_path(path).join("mtime");
-        match OpenOptions::new()
-                          .read(true)
-                          .write(true)
-                          .open(&file_path) {
-            Ok(file) => Ok(file),
+                          .open(path) {
+            Ok(file) => Ok((file, false)),
             Err(e) => {
                 if e.raw_os_error() == Some(ENOENT) {
                     match OpenOptions::new()
                                       .read(true)
                                       .write(true)
                                       .create(true)
-                                      .open(&file_path) {
-                        Ok(file) => Ok(file),
+                                      .open(path) {
+                        Ok(file) => Ok((file, true)),
                         Err(e) => {
-                            log!(self, "error creating mtime file {:?}: {}", file_path, e);
+                            log!(self, "error creating file {:?}: {}", path, e);
                             Err(e)
                         }
                     }
                 } else {
-                    log!(self, "error opening mtime file {:?}: {}", file_path, e);
+                    log!(self, "error opening file {:?}: {}", path, e);
                     Err(e)
                 }
             }
         }
     }
 
-    fn write_next_bucket_number(&self, bucket_number: u64) -> io::Result<()> {
-        let mut number_file = try!(self.get_bucket_number_file());
-        if let Err(e) = number_file.set_len(0) {
-            log!(self, "error truncating next_bucket_number file: {}", e);
-            return Err(e);
+    fn read_number_file<N: Display + FromStr,
+                        T: AsRef<Path> + ?Sized + Debug>(
+                            &self,
+                            path: &T,
+                            default: Option<N>
+                        ) -> io::Result<Option<N>>
+                        where <N as FromStr>::Err: Debug {
+        let (mut file, new) = try!(self.open_or_create_file(path));
+        if new {
+            match default {
+                Some(n) => match write!(file, "{}", n) {
+                    Ok(_) => Ok(Some(n)),
+                    Err(e) => {
+                        log!(self, "error writing to {:?}: {}", path, e);
+                        Err(e)
+                    }
+                },
+                None => Ok(None)
+            }
+        } else {
+            let mut data: Vec<u8> = vec![];
+            match file.read_to_end(&mut data) {
+                Ok(_) => (),
+                Err(e) => {
+                    log!(self, "error reading from {:?}: {}", path, e);
+                    return Err(e);
+                }
+            }
+
+            let string = match String::from_utf8(data) {
+                Ok(s) => s,
+                Err(e) => {
+                    let msg = format!("error interpreting file {:?} as UTF8 string: {}", path, e);
+                    log!(self, "{}", msg);
+                    return Err(io::Error::new(io::ErrorKind::Other, msg));
+                }
+            };
+
+            let number: N = match string.trim().parse() {
+                Ok(n) => n,
+                Err(e) => {
+                    let msg = format!("error interpreting file {:?} as number: {:?}", path, e);
+                    log!(self, "{}", msg);
+                    return Err(io::Error::new(io::ErrorKind::Other, msg));
+                }
+            };
+
+            Ok(Some(number))
         }
-        if let Err(e) = write!(number_file, "{}", bucket_number) {
-            log!(self, "error writing to next_bucket_number file: {}", e);
-            return Err(e);
+    }
+
+    fn write_number_file<N: Display + FromStr,
+                         T: AsRef<Path> + ?Sized + Debug>(
+                             &self,
+                             path: &T,
+                             number: N
+                        ) -> io::Result<()> {
+        match OpenOptions::new()
+                          .write(true)
+                          .truncate(true)
+                          .create(true)
+                          .open(&path) {
+            Ok(mut file) => {
+                if let Err(e) = write!(file, "{}", number) {
+                    log!(self, "error writing to {:?}: {}", path, e);
+                    return Err(e);
+                }
+            },
+            Err(e) => {
+                log!(self, "error opening {:?}: {}", path, e);
+                return Err(e);
+            }
         }
         Ok(())
+    }
+
+    fn cached_mtime(&self, path: &OsStr) -> Option<i64> {
+        let mtime_path: PathBuf = self.map_path(path).join("mtime");
+
+        self.read_number_file(&mtime_path, None::<i64>).unwrap_or_else(|e| {
+            log!(self, "warning: error in mtime file {:?}: {}", &mtime_path, e);
+            None
+        })
+    }
+
+    fn write_next_bucket_number(&self, bucket_number: u64) -> io::Result<()> {
+        let path = PathBuf::from(&self.buckets_dir).join("next_bucket_number");
+        self.write_number_file(&path, bucket_number)
     }
 
     fn read_next_bucket_number(&self) -> io::Result<u64> {
-        let mut number_file = try!(self.get_bucket_number_file());
-
-        let mut data: Vec<u8> = vec![];
-        try!(number_file.read_to_end(&mut data));
-
-        let file_string = match String::from_utf8(data) {
-            Ok(s) => s,
-            Err(e) => {
-                log!(self, "error: read_next_bucket_number: failed to interpret as string: {}", e);
-                return Err(io::Error::new(io::ErrorKind::Other, "parse error"));
-            }
-        };
-        let next_bucket_number = match file_string.trim().parse::<u64>() {
-            Ok(n) => n,
-            Err(e) => {
-                log!(self, "error: read_next_bucket_number: failed to parse file: {}", e);
-                return Err(io::Error::new(io::ErrorKind::Other, "parse error"));
-            }
-        };
-        Ok(next_bucket_number)
+        let path = PathBuf::from(&self.buckets_dir).join("next_bucket_number");
+        self.read_number_file(&path, Some(0u64)).and_then(|r| Ok(r.unwrap()))
     }
 
-    fn write_mtime(&self, path: &OsStr, mtime: u64) -> io::Result<()> {
-        let mut file = try!(self.get_mtime_file(path));
-        try!(file.seek(SeekFrom::Start(0)));
-        try!(write!(file, "{}", mtime));
-        Ok(())
+    fn write_mtime(&self, path: &OsStr, mtime: i64) -> io::Result<()> {
+        let path: PathBuf = self.map_path(path).join("mtime");
+        self.write_number_file(&path, mtime)
     }
 
     fn new_bucket(&mut self) -> io::Result<PathBuf> {
@@ -413,7 +409,7 @@ impl FSCache {
         }
     }
 
-    fn write_block_to_cache(&mut self, path: &OsStr, block: u64, data: &[u8], mtime: u64) {
+    fn write_block_to_cache(&mut self, path: &OsStr, block: u64, data: &[u8], mtime: i64) {
         let map_path = self.map_path(path);
         if let Err(e) = fs::create_dir_all(&map_path) {
             log!(self, "error creating map directory {:?}: {}", map_path, e);
@@ -487,7 +483,7 @@ impl FSCache {
     }
 
     pub fn fetch(&mut self, path: &OsStr, offset: u64, size: u64, file: &mut fs::File) -> io::Result<Vec<u8>> {
-        let mtime = try!(file.metadata()).mtime() as u64;
+        let mtime = try!(file.metadata()).mtime() as i64;
 
         let cached_mtime = self.cached_mtime(path);
         if cached_mtime != Some(mtime) {
