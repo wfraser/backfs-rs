@@ -72,6 +72,11 @@ impl FSCache {
     }
 
     pub fn init(&mut self) -> io::Result<()> {
+        if self.debug {
+            self.bucket_list.debug = true;
+            self.free_list.debug = true;
+        }
+
         try!(self.create_dir_and_check_access(&self.buckets_dir));
         try!(self.create_dir_and_check_access(&self.map_dir));
 
@@ -199,7 +204,10 @@ impl FSCache {
         };
         log!(self, "cached_block: bucket path: {:?}", bucket_path);
 
-        self.bucket_list.to_head(&bucket_path);
+        if self.bucket_list.to_head(&bucket_path).is_err() {
+            // If something's wrong with FSLL, don't read from cache.
+            return None;
+        }
 
         bucket_path.push("data");
         let mut block_file: File = match File::open(&bucket_path) {
@@ -239,7 +247,7 @@ impl FSCache {
 
         let mut mtime_data: Vec<u8> = vec![];
         match mtime_file.read_to_end(&mut mtime_data) {
-            Ok(nread) => (),
+            Ok(_) => (),
             Err(e) => {
                 log!(self, "warning: cached_mtime error reading mtime file  {:?}: {}", mtime_path, e);
                 return None;
