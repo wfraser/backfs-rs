@@ -90,8 +90,6 @@ impl FSCache {
 
         // TODO: check and/or write 'bucket_size' marker file
 
-        // TODO: initialize FSLL
-
         self.used_bytes = try!(self.get_cache_used_size());
 
         Ok(())
@@ -287,7 +285,6 @@ impl FSCache {
 
     fn get_bucket_number_file(&self) -> io::Result<File> {
         let number_path = PathBuf::from(&self.buckets_dir).join("next_bucket_number");
-        //match File::open(&number_path) {
         match OpenOptions::new()
                           .read(true)
                           .write(true)
@@ -321,7 +318,6 @@ impl FSCache {
 
     fn get_mtime_file<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<File> {
         let file_path = self.map_path(path).join("mtime");
-        //match File::open(&file_path) {
         match OpenOptions::new()
                           .read(true)
                           .write(true)
