@@ -6,7 +6,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fmt::Debug;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -30,7 +29,7 @@ macro_rules! error {
     ($s:expr, $fmt:expr, $($arg:tt)*) => {
         {
             let msg = fmt::format(format_args!($fmt, $($arg)*));
-            $s.log(format_args!("{}", msg));
+            $s.log(format_args!("error: {}", msg));
             return Err(io::Error::new(io::ErrorKind::Other, msg));
         }
     };
@@ -65,26 +64,17 @@ impl FSLL {
         }
     }
 
-    fn getlink<T: AsRef<Path> + ?Sized,
-               U: AsRef<Path> + ?Sized>(
+    fn getlink<T: AsRef<Path> + ?Sized + Debug,
+               U: AsRef<Path> + ?Sized + Debug>(
                    &self,
                    path: &T,
                    link: &U
-               ) -> Option<PathBuf> {
-        let mut link_path: PathBuf = path.as_ref().to_path_buf();
-        link_path.push(link);
-
-        match fs::read_link(&link_path) {
-            Ok(path) => {
-                link_path.pop();
-                link_path.push(path);
-                Some(link_path)
-            },
+               ) -> io::Result<Option<PathBuf>> {
+        match link::getlink(path, link) {
+            Ok(maybe_path) => Ok(maybe_path),
             Err(e) => {
-                if e.raw_os_error() != Some(ENOENT) {
-                    log!(self, "warning: error reading link {:?}: {}", link_path, e);
-                }
-                None
+                log!(self, "reading link {:?}/{:?}: {}", path, link, e);
+                Err(e)
             }
         }
     }
@@ -112,20 +102,20 @@ impl FSLL {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.getlink(&self.base_dir, &self.head_link).is_none()
-            && self.getlink(&self.base_dir, &self.tail_link).is_none()
+        self.getlink(&self.base_dir, &self.head_link).unwrap().is_none()
+            && self.getlink(&self.base_dir, &self.tail_link).unwrap().is_none()
     }
 
     pub fn get_tail(&self) -> Option<PathBuf> {
-        self.getlink(&self.base_dir, &self.tail_link)
+        self.getlink(&self.base_dir, &self.tail_link).unwrap()
     }
 
     fn get_head_tail(&self, method_name: &str) -> io::Result<(PathBuf, PathBuf)> {
-        let head = match self.getlink(&self.base_dir, &self.head_link) {
+        let head = match self.getlink(&self.base_dir, &self.head_link).unwrap() {
             Some(path) => path,
             None => { error!(self, "{}: head {:?} is unset", method_name, self.head_link); }
         };
-        let tail = match self.getlink(&self.base_dir, &self.tail_link) {
+        let tail = match self.getlink(&self.base_dir, &self.tail_link).unwrap() {
             Some(path) => path,
             None => { error!(self, "{}: tail {:?} is unset", method_name, self.tail_link); }
         };
@@ -134,6 +124,7 @@ impl FSLL {
     }
 
     pub fn to_head<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
+        log!(self, "to_head: {:?}", path);
         let p: &Path = path.as_ref();
 
         // There must not be the situation where the list is empty (no head or tail yet set)
@@ -141,10 +132,13 @@ impl FSLL {
         // Use insert_as_head for the other case.
         let (head, tail) = try!(self.get_head_tail("to_head"));
 
-        let next = self.getlink(path, Path::new("next"));
-        let prev = self.getlink(path, Path::new("prev"));
+        log!(self, "head {:?}", head);
+        log!(self, "tail {:?}", tail);
 
-        if prev.is_none() == (head == p) {
+        let next = try!(self.getlink(path, Path::new("next")));
+        let prev = try!(self.getlink(path, Path::new("prev")));
+
+        if prev.is_none() != (head == p) {
             if prev.is_some() {
                 error!(self, "head entry has a prev: {:?}", path);
             } else {
@@ -152,7 +146,7 @@ impl FSLL {
             }
         }
 
-        if next.is_none() == (tail == p) {
+        if next.is_none() != (tail == p) {
             if next.is_some() {
                 error!(self, "tail entry has a next: {:?}", path);
             } else {
@@ -197,10 +191,8 @@ impl FSLL {
 
     pub fn insert_as_head<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
         log!(self, "insert_as_head: {:?}", path);
-        log!(self, "base_dir: {:?}", &self.base_dir);
-        log!(self, "head_link: {:?}", &self.head_link);
-        let maybe_head = self.getlink(&self.base_dir, &self.head_link);
-        let maybe_tail = self.getlink(&self.base_dir, &self.tail_link);
+        let maybe_head = try!(self.getlink(&self.base_dir, &self.head_link));
+        let maybe_tail = try!(self.getlink(&self.base_dir, &self.tail_link));
 
         if maybe_head.is_some() && maybe_tail.is_some() {
             let head = maybe_head.as_ref().unwrap();
@@ -225,8 +217,8 @@ impl FSLL {
     }
 
     pub fn insert_as_tail<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
-        let maybe_head = self.getlink(&self.base_dir, &self.head_link);
-        let maybe_tail = self.getlink(&self.base_dir, &self.tail_link);
+        let maybe_head = try!(self.getlink(&self.base_dir, &self.head_link));
+        let maybe_tail = try!(self.getlink(&self.base_dir, &self.tail_link));
 
         if maybe_head.is_some() && maybe_tail.is_some() {
             let tail = maybe_tail.as_ref().unwrap();
@@ -253,8 +245,8 @@ impl FSLL {
         let p: &Path = path.as_ref();
 
         let (head, tail) = try!(self.get_head_tail("disconnect"));
-        let next = self.getlink(path, Path::new("next"));
-        let prev = self.getlink(path, Path::new("prev"));
+        let next = try!(self.getlink(path, Path::new("next")));
+        let prev = try!(self.getlink(path, Path::new("prev")));
 
         if head == p {
             if next.is_none() {

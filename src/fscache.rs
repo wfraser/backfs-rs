@@ -142,7 +142,6 @@ impl FSCache {
             path.push(&OsString::from("/"));
             path.push(entry.file_name());
             path.push(&OsString::from("/data"));
-            log!(self, "checking {:?}", path);
 
             let len = match fs::File::open(&path) {
                 Ok(file) => {
@@ -151,7 +150,7 @@ impl FSCache {
                             metadata.len()
                         },
                         Err(e) => {
-                            log!(self, "failed to get data file metadata: {}", e);
+                            log!(self, "failed to get data file metadata from {:?}: {}", path, e);
                             return Err(e);
                         }
                     }
@@ -160,7 +159,7 @@ impl FSCache {
                     if e.raw_os_error() == Some(ENOENT) {
                         0
                     } else {
-                        log!(self, "failed to open data file: {}", e);
+                        log!(self, "failed to open data file {:?}: {}", path, e);
                         return Err(e);
                     }
                 }
@@ -200,15 +199,11 @@ impl FSCache {
         let block_link_path: PathBuf = self.map_path(path)
                                            .join(format!("{}", block));
 
-        let mut bucket_path = PathBuf::from(&block_link_path);
-        bucket_path.pop();
-
-        match fs::read_link(&block_link_path) {
-            Ok(path) => { bucket_path.push(path); },
+        let bucket_path = match link::getlink(&self.map_path(path), &format!("{}", block)) {
+            Ok(Some(path)) => { path },
+            Ok(None) => { return None; }
             Err(e) => {
-                if e.raw_os_error() != Some(ENOENT) {
-                    log!(self, "warning: cached_block error looking up {:?}: {}", block_link_path, e);
-                }
+                log!(self, "warning: cached_block error looking up {:?}: {}", block_link_path, e);
                 return None;
             }
         };
@@ -219,11 +214,11 @@ impl FSCache {
             return None;
         }
 
-        bucket_path.push("data");
-        let mut block_file: File = match File::open(&bucket_path) {
+        let data_path = bucket_path.join("data");
+        let mut block_file: File = match File::open(&data_path) {
             Ok(file) => file,
             Err(e) => {
-                log!(self, "warning: cached_block error opening bucket data file {:?}: {}", bucket_path, e);
+                log!(self, "warning: cached_block error opening bucket data file {:?}: {}", data_path, e);
                 return None;
             }
         };
@@ -235,7 +230,7 @@ impl FSCache {
                 Some(data)
             },
             Err(e) => {
-                log!(self, "warning: cached_block reading from data file {:?}: {}", bucket_path, e);
+                log!(self, "warning: cached_block reading from data file {:?}: {}", data_path, e);
                 None
             }
         }
@@ -407,6 +402,7 @@ impl FSCache {
 
     fn get_bucket(&mut self) -> io::Result<PathBuf> {
         if self.free_list.is_empty() {
+            log!(self, "making new bucket");
             self.new_bucket()
         } else {
             let free_bucket: PathBuf = self.free_list.get_tail().unwrap();
