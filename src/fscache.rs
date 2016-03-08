@@ -454,8 +454,18 @@ impl FSCache {
             Ok(mut file) => {
                 match file.write_all(data) {
                     Ok(()) => {
-                        match link::makelink(&map_path, &format!("{}", block), Some(&bucket_path)) {
-                            Ok(()) => false,
+                        match link::makelink(&map_path, &format!("{}", block),
+                                             Some(&bucket_path)) {
+                            Ok(()) => {
+                                match link::makelink(&bucket_path, "parent",
+                                                     Some(&map_path.join(format!("{}", block)))) {
+                                    Ok(()) => false,
+                                    Err(e) => {
+                                        log!(self, "error symlinking bucket to its parent: {}", e);
+                                        true
+                                    }
+                                }
+                            }
                             Err(e) => {
                                 log!(self, "error symlinking cache bucket into map: {}", e);
                                 true
@@ -487,6 +497,14 @@ impl FSCache {
         }
         if let Err(e) = self.free_list.insert_as_tail(path) {
             log!(self, "error inserting bucket into free list {:?}: {}", path, e);
+            return Err(e);
+        }
+        if let Err(e) = link::makelink(path, "parent", None::<&Path>) {
+            log!(self, "error removing bucket parent link {:?}/parent: {}", path, e);
+            return Err(e);
+        }
+        if let Err(e) = fs::remove_file(PathBuf::from(path.as_ref()).join("data")) {
+            log!(self, "error removing bucket data file {:?}/data: {}", path, e);
             return Err(e);
         }
         Ok(())
@@ -556,6 +574,70 @@ impl FSCache {
                 break;
             } else {
                 log!(self, "invalidate_path: removed empty map directory {:?}", parent_path);
+            }
+        }
+    }
+
+    fn is_bucket_orphaned<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> bool {
+        let parent = match link::getlink(path, "parent") {
+            Ok(Some(path)) => path,
+            Ok(None) => { return false; },
+            Err(e) => {
+                log!(self, "is_bucket_orphaned: error reading parent link of {:?}: {}", path, e);
+                return false;
+            }
+        };
+
+        let parent_link_back = match link::getlink("", &parent) {
+            Ok(Some(path)) => path,
+            Ok(None) => {
+                log!(self, "bucket is orphaned - no link back from parent: {:?} -> {:?}",
+                     path, parent);
+                return true;
+            },
+            Err(e) => {
+                log!(self, "is_bucket_orphaned: error reading link back from {:?}: {}", parent, e);
+                return true;
+            },
+        };
+
+        if parent_link_back != path.as_ref() {
+            log!(self, "bucket is orphaned - parent links elsewhere: {:?} -> {:?} -> {:?}",
+                 path, parent, parent_link_back);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn free_orphaned_buckets(&self) {
+        log!(self, "free_orphaned_buckets");
+
+        let entries = match fs::read_dir(&self.buckets_dir) {
+            Ok(entries) => entries,
+            Err(e) => {
+                log!(self, "free_orphaned_buckets: error opening buckets directory: {}", e);
+                return;
+            }
+        };
+
+        for entry_result in entries {
+            match entry_result {
+                Ok(entry) => {
+                    if entry.file_type().unwrap().is_dir() {
+                        let entry_path = entry.path();
+                        if self.is_bucket_orphaned(&entry_path) {
+                            if let Err(e) = self.free_bucket(&entry_path) {
+                                log!(self, "free_orphaned_buckets: error freeing {:?}: {}",
+                                     entry_path, e);
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    log!(self, "free_orphaned_buckets: error listing buckets directory: {}", e);
+                    return;
+                }
             }
         }
     }

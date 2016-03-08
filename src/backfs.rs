@@ -35,7 +35,7 @@ const BACKFS_CONTROL_FILE_PATH: &'static str = "/.backfs_control";
 const BACKFS_VERSION_FILE_NAME: &'static str = ".backfs_version";
 const BACKFS_VERSION_FILE_PATH: &'static str = "/.backfs_version";
 
-const BACKFS_CONTROL_FILE_HELP: &'static str = "commands: test, noop, invalidate <path>\n";
+const BACKFS_CONTROL_FILE_HELP: &'static str = "commands: test, noop, invalidate <path>, free_orphans\n";
 
 const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
     ino: 0,
@@ -188,7 +188,9 @@ impl<'a> BackFS<'a> {
             "invalidate" => {
                 self.fscache.invalidate_path(arg);
             },
-            //TODO: "free_orphans"
+            "free_orphans" => {
+                self.fscache.free_orphaned_buckets();
+            },
             _ => {
                 reply.error(EBADMSG);
                 return;
