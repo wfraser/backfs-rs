@@ -7,3 +7,4 @@ authors = ["William R. Fraser <wfraser@codewise.org>"]
 fuse = "0.2.7"
 libc = "0.2.7"
 time = "0.1.34"
+walkdir = "0.1.5"

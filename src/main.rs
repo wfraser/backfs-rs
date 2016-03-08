@@ -32,6 +32,7 @@ mod link;
 extern crate libc;
 extern crate time;
 extern crate fuse;
+extern crate walkdir;
 
 fn main() {
     let args = env::args().collect::<Vec<String>>();

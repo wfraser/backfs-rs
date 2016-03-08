@@ -14,8 +14,8 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-
 use libc::*;
+use walkdir::WalkDir;
 
 use fsll::FSLL;
 use link;
@@ -107,7 +107,7 @@ impl FSCache {
             },
             Ok(None) => unreachable!()
         }
-                               
+
         self.used_bytes = try!(self.get_cache_used_size());
 
         Ok(())
@@ -285,7 +285,24 @@ impl FSCache {
                             default: Option<N>
                         ) -> io::Result<Option<N>>
                         where <N as FromStr>::Err: Debug {
-        let (mut file, new) = try!(self.open_or_create_file(path));
+        let (mut file, new) = if default.is_none() {
+            // If no default value was given, don't create a file, just open the existing one if
+            // there is one, or return None.
+            let file = match File::open(path) {
+                Ok(file) => file,
+                Err(e) => {
+                    if e.raw_os_error() == Some(ENOENT) {
+                        return Ok(None);
+                    } else {
+                        return Err(e);
+                    }
+                }
+            };
+            (file, false)
+        } else {
+            try!(self.open_or_create_file(path))
+        };
+
         if new {
             match default {
                 Some(n) => match write!(file, "{}", n) {
@@ -475,11 +492,72 @@ impl FSCache {
         Ok(())
     }
 
-    pub fn invalidate_path(&self, path: &OsStr) {
-        let _map_path: PathBuf = self.map_path(path);
-        // TODO: walk the directory at map_path, for each symlink in it, read the link, then pass
-        // those paths to free_bucket. Remove each symlink, then remove the empty map dir (and any
-        // empty parent directories up to the map root).
+    pub fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) {
+        let map_path: PathBuf = self.map_path(path);
+        log!(self, "invalidate_path: {:?}", &map_path);
+
+        for entry_result in WalkDir::new(&map_path) {
+            match entry_result {
+                Ok(entry) => {
+                    let entry_path = entry.path();
+                    if entry.file_type().is_symlink() {
+                        let bucket_path = match link::getlink("", entry_path) {
+                            Ok(Some(path)) => path,
+                            Err(e) => {
+                                log!(self, "invalidate_path: error reading link {:?}: {}",
+                                     entry.path(), e);
+                                continue;
+                            },
+                            Ok(None) => unreachable!()
+                        };
+
+                        log!(self, "invalidate_path: invalidating {:?} - freeing {:?}",
+                             entry_path, &bucket_path);
+                        self.free_bucket(&bucket_path).unwrap();
+                        fs::remove_file(entry_path).unwrap();
+                    } else if entry.file_type().is_file() && entry.file_name() == "mtime" {
+                        fs::remove_file(entry_path).unwrap();
+                    }
+                },
+                Err(e) => {
+                    let is_start = e.path() == Some(&map_path);
+                    let ioerr = io::Error::from(e);
+                    if is_start && ioerr.raw_os_error() == Some(ENOENT) {
+                        // If the map directory doesn't exist, there's nothing to do.
+                        return;
+                    } else {
+                        log!(self, "invalidate_path: error reading directory entry from {:?}: {:?}",
+                             map_path, ioerr);
+                    }
+                }
+            }
+        }
+
+        // Now we've freed all buckets under map_path; remove the map directories under here.
+        fs::remove_dir_all(&map_path).unwrap();
+
+        // Walk back up the tree and remove any map directories that are now empty.
+        let mut parent_path: &Path = &map_path;
+        loop {
+            match parent_path.parent() {
+                Some(path) => { parent_path = path; },
+                None => { break; }
+            }
+
+            if parent_path == Path::new(&self.map_dir) {
+                break;
+            }
+
+            if let Err(e) = fs::remove_dir(parent_path) {
+                if e.raw_os_error() != Some(ENOTEMPTY) {
+                    log!(self, "invalidate_path: failed to remove empty map directory {:?}: {}",
+                         parent_path, e);
+                }
+                break;
+            } else {
+                log!(self, "invalidate_path: removed empty map directory {:?}", parent_path);
+            }
+        }
     }
 
     pub fn fetch(&mut self, path: &OsStr, offset: u64, size: u64, file: &mut fs::File) -> io::Result<Vec<u8>> {
