@@ -1,0 +1,25 @@
+Remaining things to implement:
+- keep track of cache used size
+    - when writing to cache
+    - when freeing buckets
+- free buckets when max cache size is exceeded
+- free buckets when device reports out of space
+- running in background
+- more syscalls:
+    - readlink
+    - opendir / releasedir (set the filehandle; use filehandle in readdir)
+    - open / release (ditto)
+- xattr support
+    - special backfs xattrs
+- RW mode
+    - write
+    - truncate
+    - create
+    - unlink
+    - mkdir
+    - rmdir
+    - symlink
+    - rename
+    - link
+    - chown
+
