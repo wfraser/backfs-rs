@@ -34,9 +34,12 @@ mod link;
 mod osstrextras;
 use osstrextras::OsStrExtras;
 
+extern crate daemonize;
+use daemonize::Daemonize;
+
+extern crate fuse;
 extern crate libc;
 extern crate time;
-extern crate fuse;
 extern crate walkdir;
 
 fn main() {
@@ -68,6 +71,13 @@ fn main() {
         // have FUSE automatically unmount when the process exits.
         settings.fuse_options.push(OsString::from("auto_unmount"));
     } else {
+        settings.mount_point = match fs::canonicalize(settings.mount_point) {
+            Ok(pathbuf) => pathbuf.into_os_string(),
+            Err(e) => {
+                println!("error canonicalizing mount point: {}", e);
+                process::exit(-1);
+            }
+        };
         settings.backing_fs = match fs::canonicalize(settings.backing_fs) {
             Ok(pathbuf) => pathbuf.into_os_string(),
             Err(e) => {
@@ -109,15 +119,12 @@ fn main() {
     let mountpoint = PathBuf::from(&settings.mount_point);
     let backfs = BackFS::new(settings);
 
-    let mount_fn = || {
-        fuse::mount(backfs, &mountpoint, &fuse_args.as_deref()[..]);
-    };
-
-    if foreground {
-        mount_fn();
-    } else {
-        // TODO
-        //daemonize(mount_fn);
-        mount_fn();
+    if !foreground {
+        println!("BackFS going to background.");
+        if let Err(e) = Daemonize::new().working_directory("/").start() {
+            println!("Error forking to background: {}", e);
+        }
     }
+
+    fuse::mount(backfs, &mountpoint, &fuse_args.as_deref()[..]);
 }

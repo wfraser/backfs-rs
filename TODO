@@ -4,7 +4,6 @@ Remaining things to implement:
     - when freeing buckets
 - free buckets when max cache size is exceeded
 - free buckets when device reports out of space
-- running in background
 - more syscalls:
     - readlink
     - opendir / releasedir (set the filehandle; use filehandle in readdir)

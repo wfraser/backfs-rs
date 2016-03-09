@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["William R. Fraser <wfraser@codewise.org>"]
 
 [dependencies]
+daemonize = '0.2.1'
 fuse = "0.2.7"
 libc = "0.2.8"
 time = "0.1.34"
