@@ -37,13 +37,13 @@ macro_rules! log {
 }
 
 impl FSCache {
-    pub fn new(cache: &str, block_size: u64) -> FSCache {
-        let buckets_dir = OsString::from(String::from(cache) + "/buckets");
+    pub fn new(cache: &OsString, block_size: u64) -> FSCache {
+        let buckets_dir = PathBuf::from(cache).join("buckets").into_os_string();
         FSCache {
             bucket_list: FSLL::new(&buckets_dir, "head", "tail"),
             free_list: FSLL::new(&buckets_dir, "free_head", "free_tail"),
             buckets_dir: buckets_dir,
-            map_dir: OsString::from(String::from(cache) + "/map"),
+            map_dir: PathBuf::from(cache).join("map").into_os_string(),
             block_size: block_size,
             used_bytes: 0u64,
             next_bucket_number: 0u64,
@@ -674,6 +674,10 @@ impl FSCache {
                 },
                 None => {
                     log!(self, "cache miss: reading {} to {} from real file", block * self.block_size, (block + 1) * self.block_size);
+
+                    // TODO: try to write into a slice of `result` in place instead of writing to
+                    // a new buffer and moving the data later.
+
                     let mut buf: Vec<u8> = Vec::with_capacity(self.block_size as usize);
                     unsafe {
                         buf.set_len(self.block_size as usize);

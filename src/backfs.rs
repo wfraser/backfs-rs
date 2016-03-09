@@ -11,7 +11,7 @@ use std::fs::File;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str;
 
@@ -54,8 +54,8 @@ const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
     flags: 0,
 };
 
-pub struct BackFS<'a> {
-    pub settings: BackfsSettings<'a>,
+pub struct BackFS {
+    pub settings: BackfsSettings,
     inode_table: InodeTable,
     fscache: FSCache,
 }
@@ -106,8 +106,8 @@ fn backfs_fake_file_attr(path: Option<&str>) -> Option<FileAttr> {
     }
 }
 
-impl<'a> BackFS<'a> {
-    pub fn new(settings: BackfsSettings<'a>) -> BackFS<'a> {
+impl BackFS {
+    pub fn new(settings: BackfsSettings) -> BackFS {
         let mut backfs = BackFS {
             fscache: FSCache::new(&settings.cache, settings.block_size as u64),
             settings: settings,
@@ -126,9 +126,7 @@ impl<'a> BackFS<'a> {
     }
 
     fn real_path(&self, partial: &OsString) -> OsString {
-        let mut path = OsString::from(self.settings.backing_fs);
-        path.push(partial);
-        path
+        PathBuf::from(&self.settings.backing_fs).join(partial).into_os_string()
     }
 
     fn stat_real(&mut self, path: &Rc<OsString>) -> io::Result<FileAttr> {
@@ -201,7 +199,7 @@ impl<'a> BackFS<'a> {
     }
 }
 
-impl<'a> Filesystem for BackFS<'a> {
+impl Filesystem for BackFS {
     fn init(&mut self, _req: &Request) -> Result<(), c_int> {
         log!(self, "init");
         self.inode_table.add(OsString::from("/"));
@@ -403,15 +401,13 @@ impl<'a> Filesystem for BackFS<'a> {
             }
 
             let real_path = self.real_path(&path);
-            let mut real_file: File;
-
-            match File::open(Path::new(&real_path)) {
-                Ok(f) => { real_file = f; },
+            let mut real_file = match File::open(Path::new(&real_path)) {
+                Ok(f) => { f },
                 Err(e) => {
                     reply.error(e.raw_os_error().unwrap());
                     return;
                 }
-            }
+            };
 
             match self.fscache.fetch(&path, offset, size as u64, &mut real_file) {
                 Ok(data) => {

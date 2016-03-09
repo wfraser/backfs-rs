@@ -5,8 +5,10 @@
 
 use std::env;
 use std::ffi::OsString;
+use std::fs;
 use std::ops::Deref;
-use std::path::Path;
+use std::path::PathBuf;
+use std::process;
 
 trait VecDeref<T: Deref> {
     fn as_deref(&self) -> Vec<&T::Target>;
@@ -29,13 +31,16 @@ mod fsll;
 mod inodetable;
 mod link;
 
+mod osstrextras;
+use osstrextras::OsStrExtras;
+
 extern crate libc;
 extern crate time;
 extern crate fuse;
 extern crate walkdir;
 
 fn main() {
-    let args = env::args().collect::<Vec<String>>();
+    let args = env::args_os().collect::<Vec<OsString>>();
     let mut settings = BackfsSettings::parse(&args);
 
     if settings.cache.is_empty() {
@@ -49,46 +54,70 @@ fn main() {
 
     if settings.help {
         println!("{}\nFUSE options:", arg_parse::USAGE);
-        settings.fuse_options.push("--help");
-        settings.mount_point = ".";  // placate the mount call
+        settings.fuse_options.push(OsString::from("--help"));
+        settings.mount_point = OsString::from(".");  // placate the mount call
     }
 
     if settings.version {
         print!("{}", backfs::BACKFS_VERSION);
-        settings.fuse_options.push("--version");
-        settings.mount_point = ".";  // placate the mount call
+        settings.fuse_options.push(OsString::from("--version"));
+        settings.mount_point = OsString::from(".");  // placate the mount call
     }
 
     if settings.foreground {
         // have FUSE automatically unmount when the process exits.
-        settings.fuse_options.push("auto_unmount");
+        settings.fuse_options.push(OsString::from("auto_unmount"));
+    } else {
+        settings.backing_fs = match fs::canonicalize(settings.backing_fs) {
+            Ok(pathbuf) => pathbuf.into_os_string(),
+            Err(e) => {
+                println!("error canonicalizing backing filesystem path: {}", e);
+                process::exit(-1);
+            }
+        };
+        settings.cache = match fs::canonicalize(settings.cache) {
+            Ok(pathbuf) => pathbuf.into_os_string(),
+            Err(e) => {
+                println!("error canonicalizing cache path: {}", e);
+                process::exit(-1);
+            }
+        };
     }
 
     let mut fuse_args: Vec<OsString> = vec![];
     if settings.fuse_options.len() > 0 {
-        let mut fuse_options = "".to_string();
+        let mut fuse_options = OsString::new();
 
         for option in settings.fuse_options.iter() {
             if option.starts_with("-") {
                 fuse_args.push(OsString::from(option));
             } else {
                 if !fuse_options.is_empty() {
-                    fuse_options.push_str(",");
+                    fuse_options.push(",");
                 }
-                fuse_options.push_str(option);
+                fuse_options.push(option);
             }
         }
 
         if !fuse_options.is_empty() {
             fuse_args.push(OsString::from("-o"));
-            fuse_args.push(OsString::from(fuse_options));
+            fuse_args.push(fuse_options);
         }
     }
 
-    let mountpoint = Path::new(settings.mount_point);
-
+    let foreground = settings.foreground;
+    let mountpoint = PathBuf::from(&settings.mount_point);
     let backfs = BackFS::new(settings);
 
-    // TODO: need to fork to background before doing this, unless backfs.settings.foreground is specified.
-    fuse::mount(backfs, &mountpoint, &fuse_args.as_deref()[..]);
+    let mount_fn = || {
+        fuse::mount(backfs, &mountpoint, &fuse_args.as_deref()[..]);
+    };
+
+    if foreground {
+        mount_fn();
+    } else {
+        // TODO
+        //daemonize(mount_fn);
+        mount_fn();
+    }
 }
