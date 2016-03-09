@@ -34,8 +34,29 @@ pub struct FSCache {
 }
 
 macro_rules! log {
-    ($s:expr, $fmt:expr) => ($s.log(format_args!($fmt)));
-    ($s:expr, $fmt:expr, $($arg:tt)*) => ($s.log(format_args!($fmt, $($arg)*)));
+    ($s:expr, $fmt:expr) => ($s.log(format_args!(concat!("FSCache: ", $fmt, "\n"))));
+    ($s:expr, $fmt:expr, $($arg:tt)*) => ($s.log(format_args!(concat!("FSCache: ", $fmt, "\n"), $($arg)*)));
+}
+
+macro_rules! trylog {
+    ($s:expr, $e:expr, $fmt:expr) => {
+        match $e {
+            Ok(x) => x,
+            Err(e) => {
+                $s.log(format_args!(concat!("FSCache: ", $fmt, ": {}\n"), e));
+                return Err(e);
+            }
+        }
+    };
+    ($s:expr, $e:expr, $fmt:expr, $($arg:tt)*) => {
+        match $e {
+            Ok(x) => x,
+            Err(e) => {
+                $s.log(format_args!(concat!("FSCache: ", $fmt, ": {}\n"), $($arg)*, e));
+                return Err(e);
+            },
+        }
+    }
 }
 
 impl FSCache {
@@ -82,8 +103,7 @@ impl FSCache {
 
     fn get_fs_size<T: AsRef<Path> + ?Sized + fmt::Debug>(&self, path: &T) -> io::Result<u64> {
         unsafe {
-            let path_str = path.as_ref().to_owned().into_os_string();
-            let path_c = CString::from_vec_unchecked(path_str.into_vec());
+            let path_c = CString::from_vec_unchecked(Vec::from(path.as_ref().as_os_str().as_bytes()));
             let mut statbuf: statvfs = mem::zeroed();
             if -1 == statvfs(path_c.into_raw(), &mut statbuf as *mut statvfs) {
                 Err(io::Error::last_os_error())
@@ -144,34 +164,15 @@ impl FSCache {
     fn compute_cache_used_size(&mut self) -> io::Result<u64> {
         let mut size = 0u64;
 
-        let readdir = match fs::read_dir(Path::new(&self.buckets_dir)) {
-            Ok(readdir) => readdir,
-            Err(e) => {
-                log!(self, "error getting directory listing for bucket directory: {}", e);
-                return Err(e);
-            }
-        };
+        let readdir = trylog!(self, fs::read_dir(Path::new(&self.buckets_dir)),
+                              "error getting directory listing for bucket directory");
 
         for entry_result in readdir {
-            let entry = match entry_result {
-                Ok(entry) => entry,
-                Err(e) => {
-                    log!(self, "error reading directory entry: {}", e);
-                    return Err(e);
-                }
-            };
-
-            match entry.file_type() {
-                Ok(ft) => {
-                    if !ft.is_dir() {
-                        continue;
-                    }
-                },
-                Err(e) => {
-                    log!(self, "error getting file type of {:?}: {}",
-                               entry.file_name(), e);
-                    return Err(e);
-                }
+            let entry = trylog!(self, entry_result, "error reading directory entry");
+            let filetype = trylog!(self, entry.file_type(),
+                                   "error getting file type of {:?}", entry.file_name());
+            if !filetype.is_dir() {
+                continue;
             }
 
             let bucket_number: u64 = match entry.file_name().to_str() {
@@ -191,15 +192,8 @@ impl FSCache {
 
             let len = match fs::File::open(&path) {
                 Ok(file) => {
-                    match file.metadata() {
-                        Ok(metadata) => {
-                            metadata.len()
-                        },
-                        Err(e) => {
-                            log!(self, "failed to get data file metadata from {:?}: {}", path, e);
-                            return Err(e);
-                        }
-                    }
+                    trylog!(self, file.metadata().and_then(|m| Ok(m.len())),
+                            "failed to get data file metadata from {:?}", path)
                 },
                 Err(e) => {
                     if e.raw_os_error() == Some(ENOENT) {
@@ -237,7 +231,7 @@ impl FSCache {
 
     fn log(&self, args: fmt::Arguments) {
         if self.debug {
-            println!("FSCache: {}", fmt::format(args));
+            io::stdout().write_fmt(args).unwrap();
         }
     }
 
@@ -344,13 +338,8 @@ impl FSCache {
             }
         } else {
             let mut data: Vec<u8> = vec![];
-            match file.read_to_end(&mut data) {
-                Ok(_) => (),
-                Err(e) => {
-                    log!(self, "error reading from {:?}: {}", path, e);
-                    return Err(e);
-                }
-            }
+            trylog!(self, file.read_to_end(&mut data),
+                "error reading from {:?}", path);
 
             let string = match String::from_utf8(data) {
                 Ok(s) => s,
@@ -386,10 +375,8 @@ impl FSCache {
                           .create(true)
                           .open(&path) {
             Ok(mut file) => {
-                if let Err(e) = write!(file, "{}", number) {
-                    log!(self, "error writing to {:?}: {}", path, e);
-                    return Err(e);
-                }
+                trylog!(self, write!(file, "{}", number),
+                    "error writing to {:?}", path);
             },
             Err(e) => {
                 log!(self, "error opening {:?}: {}", path, e);
@@ -425,19 +412,13 @@ impl FSCache {
 
     fn new_bucket(&mut self) -> io::Result<PathBuf> {
         let bucket_path = PathBuf::from(&self.buckets_dir).join(format!("{}", self.next_bucket_number));
-        if let Err(e) = fs::create_dir(&bucket_path) {
-            log!(self, "error creating bucket directory {:?}: {}", bucket_path, e);
-            return Err(e);
-        }
+        trylog!(self, fs::create_dir(&bucket_path),
+            "error creating bucket directory {:?}", bucket_path);
         self.next_bucket_number += 1;
-        if let Err(e) = self.write_next_bucket_number(self.next_bucket_number) {
-            log!(self, "error writing next bucket number: {}", e);
-            return Err(e);
-        }
-        if let Err(e) = self.bucket_list.insert_as_head(&bucket_path) {
-            log!(self, "error setting bucket as head of used list: {}", e);
-            return Err(e);
-        }
+        trylog!(self, self.write_next_bucket_number(self.next_bucket_number),
+            "error writing next bucket number");
+        trylog!(self, self.bucket_list.insert_as_head(&bucket_path),
+            "error setting bucket as head of used list");
         Ok(bucket_path)
     }
 
@@ -456,14 +437,23 @@ impl FSCache {
 
     fn write_block_to_cache(&mut self, path: &OsStr, block: u64, data: &[u8], mtime: i64) {
         let map_path = self.map_path(path);
-        if let Err(e) = fs::create_dir_all(&map_path) {
-            log!(self, "error creating map directory {:?}: {}", map_path, e);
-            return;
-        }
 
-        if let Err(e) = self.write_mtime(path, mtime) {
-            log!(self, "error writing mtime file; not writing data to cache: {}", e);
-            return;
+        let cached_mtime: Option<i64> = self.cached_mtime(path);
+        if cached_mtime != Some(mtime) {
+            if cached_mtime.is_some() {
+                log!(self, "write_block_to_cache: existing mtime is stale; invalidating {:?}", path);
+                self.invalidate_path_keep_directories(path);
+            } else {
+                if let Err(e) = fs::create_dir_all(&map_path) {
+                    log!(self, "error creating map directory {:?}: {}", map_path, e);
+                    return;
+                }
+            }
+
+            if let Err(e) = self.write_mtime(path, mtime) {
+                log!(self, "error writing mtime file; not writing data to cache: {}", e);
+                return;
+            }
         }
 
         let bucket_path: PathBuf = match self.get_bucket() {
@@ -519,26 +509,39 @@ impl FSCache {
     }
 
     fn free_bucket<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
-        if let Err(e) = self.bucket_list.disconnect(path) {
-            log!(self, "error disconnecting bucket from used list {:?}: {}", path, e);
-            return Err(e);
+        trylog!(self, self.bucket_list.disconnect(path),
+                "error disconnecting bucket from used list {:?}", path);
+        trylog!(self, self.free_list.insert_as_tail(path),
+                "error inserting bucket into free list {:?}", path);
+
+        // Remove the parent link if there is one.
+        if let Some(parent_path) = trylog!(self, link::getlink(path, "parent"),
+                                           "error reading parent link from bucket {:?}", path) {
+            log!(self, "removing parent {:?}", &parent_path);
+            trylog!(self, link::makelink("", &parent_path, None::<&Path>),
+                    "error removing parent link-back {:?}", parent_path);
+            self.trim_empty_directories(&parent_path);
         }
-        if let Err(e) = self.free_list.insert_as_tail(path) {
-            log!(self, "error inserting bucket into free list {:?}: {}", path, e);
-            return Err(e);
-        }
-        if let Err(e) = link::makelink(path, "parent", None::<&Path>) {
-            log!(self, "error removing bucket parent link {:?}/parent: {}", path, e);
-            return Err(e);
-        }
-        if let Err(e) = fs::remove_file(PathBuf::from(path.as_ref()).join("data")) {
-            log!(self, "error removing bucket data file {:?}/data: {}", path, e);
-            return Err(e);
-        }
+
+        trylog!(self, link::makelink(path, "parent", None::<&Path>),
+                "error removing bucket parent link {:?}/parent", path);
+        trylog!(self, fs::remove_file(PathBuf::from(path.as_ref()).join("data")),
+                "error removing bucket data file {:?}/data", path);
+
         Ok(())
     }
 
     pub fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) {
+        self.invalidate_path_internal(path, true)
+    }
+
+    // For use when you're going to turn around and use that path again immediately.
+    fn invalidate_path_keep_directories<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) {
+        self.invalidate_path_internal(path, false)
+    }
+
+    fn invalidate_path_internal<T: AsRef<Path> + ?Sized + Debug>(
+            &self, path: &T, remove_directories: bool) {
         let map_path: PathBuf = self.map_path(path);
         log!(self, "invalidate_path: {:?}", &map_path);
 
@@ -579,11 +582,16 @@ impl FSCache {
             }
         }
 
-        // Now we've freed all buckets under map_path; remove the map directories under here.
-        fs::remove_dir_all(&map_path).unwrap();
+        if remove_directories {
+            // Now we've freed all buckets under map_path; remove the map directories under here.
+            fs::remove_dir_all(&map_path).unwrap();
+            self.trim_empty_directories(&map_path);
+        }
+    }
 
+    fn trim_empty_directories<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) {
         // Walk back up the tree and remove any map directories that are now empty.
-        let mut parent_path: &Path = &map_path;
+        let mut parent_path: &Path = path.as_ref();
         loop {
             match parent_path.parent() {
                 Some(path) => { parent_path = path; },
@@ -678,7 +686,7 @@ impl FSCache {
             if cached_mtime.is_some() {
                 log!(self, "cached data is stale, invalidating: {:?}", path);
             }
-            self.invalidate_path(path);
+            self.invalidate_path_keep_directories(path);
         }
 
         let first_block = offset / self.block_size;
