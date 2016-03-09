@@ -126,7 +126,9 @@ impl BackFS {
     }
 
     fn real_path(&self, partial: &OsString) -> OsString {
-        PathBuf::from(&self.settings.backing_fs).join(partial).into_os_string()
+        PathBuf::from(&self.settings.backing_fs)
+                .join(Path::new(partial).strip_prefix("/").unwrap())
+                .into_os_string()
     }
 
     fn stat_real(&mut self, path: &Rc<OsString>) -> io::Result<FileAttr> {
