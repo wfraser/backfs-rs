@@ -9,6 +9,7 @@ use std::fmt;
 use std::fs;
 use std::fs::File;
 use std::io;
+use std::ops::Div;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ use arg_parse::BackfsSettings;
 use inodetable::InodeTable;
 use fscache::FSCache;
 
+use daemonize::Daemonize;
 use fuse::{FileType, FileAttr, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyWrite, Request};
 use libc::*;
 use time::Timespec;
@@ -106,10 +108,23 @@ fn backfs_fake_file_attr(path: Option<&str>) -> Option<FileAttr> {
     }
 }
 
+fn human_number<T: Div<u64> + PartialOrd<u64> + fmt::Display>(n: T) -> String
+                where <T as Div<u64>>::Output: fmt::Display {
+    if n >= 1024 * 1024 * 1024 {
+        format!("{} GiB", n / (1024 * 1024 * 1024))
+    } else if n >= 1024 * 1024 {
+        format!("{} MiB", n / (1024 * 1024))
+    } else if n >= 1024 {
+        format!("{} KiB", n / (1024))
+    } else {
+        format!("{} B", n)
+    }
+}
+
 impl BackFS {
     pub fn new(settings: BackfsSettings) -> BackFS {
         let mut backfs = BackFS {
-            fscache: FSCache::new(&settings.cache, settings.block_size as u64),
+            fscache: FSCache::new(&settings.cache, settings.block_size as u64, settings.cache_size),
             settings: settings,
             inode_table: InodeTable::new(),
         };
@@ -199,26 +214,58 @@ impl BackFS {
 
         reply.written(data.len() as u32);
     }
-}
 
-impl Filesystem for BackFS {
-    fn init(&mut self, _req: &Request) -> Result<(), c_int> {
-        log!(self, "init");
+    fn internal_init(&mut self) -> io::Result<()> {
+        println!("BackFS: Initializing cache and scanning existing cache directory...");
         self.inode_table.add(OsString::from("/"));
         self.inode_table.add(OsString::from(BACKFS_CONTROL_FILE_PATH));
         self.inode_table.add(OsString::from(BACKFS_VERSION_FILE_PATH));
 
         if let Err(e) = self.fscache.init() {
-            log!(self, "error: failed to initialize cache");
-
-            // Returning this error doesn't seem to do anything:
-            //return Err(e.raw_os_error().unwrap());
-
-            // So let's panic instead.
-            panic!(format!("{}", e));
+            println!("Error: Failed to initialize cache: {}", e);
+            return Err(e);
         }
 
-        log!(self, "ready");
+        let max_cache = if self.settings.cache_size == 0 {
+            match self.fscache.max_size() {
+                Ok(n) => n,
+                Err(e) => {
+                    println!("Error: failed to statvfs on the cache filesystem: {}", e);
+                    return Err(e);
+                }
+            }
+        } else {
+            self.settings.cache_size
+        };
+
+        println!("BackFS: Cache: {} used out of {} ({:.2} %).",
+                 human_number(self.fscache.used_size()),
+                 human_number(max_cache),
+                 (self.fscache.used_size() as f64 / max_cache as f64 * 100.));
+
+        Ok(())
+    }
+}
+
+impl Filesystem for BackFS {
+    fn init(&mut self, _req: &Request) -> Result<(), c_int> {
+        log!(self, "init");
+
+        if let Err(e) = self.internal_init() {
+            println!("Error initializing BackFS: {}", e);
+            panic!(e);
+        }
+
+        println!("BackFS: Ready.");
+
+        if !self.settings.foreground {
+            println!("BackFS: Going to background.");
+            if let Err(e) = Daemonize::new().working_directory("/").start() {
+                println!("Error forking to background: {}", e);
+                panic!(e);
+            }
+        }
+
         Ok(())
     }
 

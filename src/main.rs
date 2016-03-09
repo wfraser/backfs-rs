@@ -35,8 +35,6 @@ mod osstrextras;
 use osstrextras::OsStrExtras;
 
 extern crate daemonize;
-use daemonize::Daemonize;
-
 extern crate fuse;
 extern crate libc;
 extern crate time;
@@ -75,21 +73,21 @@ fn main() {
             Ok(pathbuf) => pathbuf.into_os_string(),
             Err(e) => {
                 println!("error canonicalizing mount point: {}", e);
-                process::exit(-1);
+                process::exit(1);
             }
         };
         settings.backing_fs = match fs::canonicalize(settings.backing_fs) {
             Ok(pathbuf) => pathbuf.into_os_string(),
             Err(e) => {
                 println!("error canonicalizing backing filesystem path: {}", e);
-                process::exit(-1);
+                process::exit(1);
             }
         };
         settings.cache = match fs::canonicalize(settings.cache) {
             Ok(pathbuf) => pathbuf.into_os_string(),
             Err(e) => {
                 println!("error canonicalizing cache path: {}", e);
-                process::exit(-1);
+                process::exit(1);
             }
         };
     }
@@ -115,16 +113,8 @@ fn main() {
         }
     }
 
-    let foreground = settings.foreground;
     let mountpoint = PathBuf::from(&settings.mount_point);
     let backfs = BackFS::new(settings);
-
-    if !foreground {
-        println!("BackFS going to background.");
-        if let Err(e) = Daemonize::new().working_directory("/").start() {
-            println!("Error forking to background: {}", e);
-        }
-    }
 
     fuse::mount(backfs, &mountpoint, &fuse_args.as_deref()[..]);
 }

@@ -10,8 +10,9 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::mem;
 use std::os::unix::fs::MetadataExt;
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use libc::*;
@@ -27,6 +28,7 @@ pub struct FSCache {
     free_list: FSLL,
     block_size: u64,
     used_bytes: u64,
+    max_bytes: u64,
     next_bucket_number: u64,
     pub debug: bool,
 }
@@ -37,7 +39,7 @@ macro_rules! log {
 }
 
 impl FSCache {
-    pub fn new(cache: &OsString, block_size: u64) -> FSCache {
+    pub fn new(cache: &OsString, block_size: u64, max_bytes: u64) -> FSCache {
         let buckets_dir = PathBuf::from(cache).join("buckets").into_os_string();
         FSCache {
             bucket_list: FSLL::new(&buckets_dir, "head", "tail"),
@@ -46,6 +48,7 @@ impl FSCache {
             map_dir: PathBuf::from(cache).join("map").into_os_string(),
             block_size: block_size,
             used_bytes: 0u64,
+            max_bytes: max_bytes,
             next_bucket_number: 0u64,
             debug: false,
         }
@@ -75,6 +78,19 @@ impl FSCache {
         }
 
         Ok(())
+    }
+
+    fn get_fs_size<T: AsRef<Path> + ?Sized + fmt::Debug>(&self, path: &T) -> io::Result<u64> {
+        unsafe {
+            let path_str = path.as_ref().to_owned().into_os_string();
+            let path_c = CString::from_vec_unchecked(path_str.into_vec());
+            let mut statbuf: statvfs = mem::zeroed();
+            if -1 == statvfs(path_c.into_raw(), &mut statbuf as *mut statvfs) {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(statbuf.f_bsize * statbuf.f_blocks)
+            }
+        }
     }
 
     pub fn init(&mut self) -> io::Result<()> {
@@ -108,12 +124,24 @@ impl FSCache {
             Ok(None) => unreachable!()
         }
 
-        self.used_bytes = try!(self.get_cache_used_size());
+        self.used_bytes = try!(self.compute_cache_used_size());
 
         Ok(())
     }
 
-    fn get_cache_used_size(&mut self) -> io::Result<u64> {
+    pub fn used_size(&self) -> u64 {
+        self.used_bytes
+    }
+
+    pub fn max_size(&self) -> io::Result<u64> {
+        if self.max_bytes == 0 {
+            self.get_fs_size(&self.buckets_dir)
+        } else {
+            Ok(self.max_bytes)
+        }
+    }
+
+    fn compute_cache_used_size(&mut self) -> io::Result<u64> {
         let mut size = 0u64;
 
         let readdir = match fs::read_dir(Path::new(&self.buckets_dir)) {
