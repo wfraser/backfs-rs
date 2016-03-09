@@ -259,6 +259,8 @@ impl FSLL {
                 try!(self.makelink(&self.base_dir, &self.head_link, next.as_ref()));
                 try!(self.makelink(next.as_ref().unwrap(), Path::new("prev"), None::<&Path>));
             }
+        } else if prev.is_none() {
+            error!(self, "entry has no prev but is not head: {:?}", path);
         }
 
         if tail == p {
@@ -272,6 +274,8 @@ impl FSLL {
                 try!(self.makelink(&self.base_dir, &self.tail_link, prev.as_ref()));
                 try!(self.makelink(prev.as_ref().unwrap(), Path::new("next"), None::<&Path>));
             }
+        } else if next.is_none() {
+            error!(self, "entry has no next but is not tail: {:?}", path);
         }
 
         if next.is_some() && prev.is_some() {
