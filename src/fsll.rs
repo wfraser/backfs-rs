@@ -71,7 +71,11 @@ impl FSLL {
                    link: &U
                ) -> io::Result<Option<PathBuf>> {
         match link::getlink(path, link) {
-            Ok(maybe_path) => Ok(maybe_path),
+            Ok(None) => Ok(None)
+            Ok(Some(result)) => {
+                // TODO: try to fix up absolute paths
+                Ok(Some(result))
+            },
             Err(e) => {
                 log!(self, "reading link {:?}/{:?}: {}", path, link, e);
                 Err(e)

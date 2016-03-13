@@ -10,23 +10,52 @@ use libc;
 
 #[test]
 fn test_relpaths() {
-    assert_eq!(&make_path_relative_to("one/two/three", "one/foo/bar"), Path::new("../foo/bar"));
-    assert_eq!(&make_path_relative_to("not/related", "at/all"), Path::new("../at/all"));
-    assert_eq!(&make_path_relative_to("this", "other"), Path::new("other"));
-    assert_eq!(&make_path_relative_to("foo/bar", "foo/hello/world"), Path::new("hello/world"));
-    assert_eq!(&make_path_relative_to("one", "two/three"), Path::new("two/three"));
-    assert_eq!(&make_path_relative_to("one/two/three", "one/two/other"), Path::new("other"));
-    assert_eq!(&make_path_relative_to("one/two/three/four", "one/other"), Path::new("../../other"));
+    macro_rules! test {
+        ($a:expr, $b:expr => $c:expr) => (assert_eq!(&make_path_relative_to($a, $b), Path::new($c)));
+    }
+
+    test!("one/two/three", "one/foo/bar" => "../foo/bar");
+    test!("not/related", "at/all" => "../at/all");
+    test!("this", "other" => "other");
+    test!("foo/bar", "foo/hello/world" => "hello/world");
+    test!("one", "two/three" => "two/three");
+    test!("one/two/three", "one/two/other" => "other");
+    test!("one/two/three/four", "one/other" => "../../other");
 }
 
+#[test]
+fn test_absolutepaths() {
+    macro_rules! test {
+        ($a:expr, $b:expr => $c:expr) => (assert_eq!(&make_path_relative_to($a, $b), Path::new($c));)
+    }
+
+    test!("one/two", "/absolute/path" => "/absolute/path");
+    // TODO catch this panic: test!("/absolute/path", "one/two" => "/absolute/one/two");
+    test!("/absolute/one", "/absolute/two/three" => "two/three");
+}
+
+/// Takes two relative paths, which are assumed to both be relative to some unspecified common base
+/// path, and returns the second one, altered so as to be relative to the first.
 fn make_path_relative_to<T: AsRef<Path> + ?Sized,
                          U: AsRef<Path> + ?Sized>(
                              reference: &T,
                              path: &U
                          ) -> PathBuf {
+    let r: &Path = reference.as_ref();
     let p: &Path = path.as_ref();
+
+    if r.is_absolute() && !p.is_absolute() {
+        // There's nothing sensible we can do here, because we have no idea what `path` is
+        // originally relative to.
+        panic!("invalid arguments to link::make_path_relative_to");
+    }
+
+    if p.is_absolute() && !r.is_absolute() {
+        return p.to_path_buf();
+    }
+
     let mut path_adjusted = PathBuf::new();
-    let mut reference_truncated: &Path = reference.as_ref();
+    let mut reference_truncated: &Path = r;
     let mut first = true;
     loop {
         match p.strip_prefix(reference_truncated) {
@@ -81,10 +110,29 @@ pub fn makelink<T: AsRef<Path> + ?Sized,
 
 #[test]
 fn test_resolve_path() {
-    assert_eq!(resolve_path(PathBuf::from("one/two/three"), &PathBuf::from("../../four/five")), PathBuf::from("four/five"));
-    assert_eq!(resolve_path(PathBuf::from("one"), &PathBuf::from("two/three")), PathBuf::from("two/three"));
+    macro_rules! test {
+        ($a:expr, $b:expr => $c:expr) => (assert_eq!(resolve_path(PathBuf::from($a),
+                                                                  &PathBuf::from($b)),
+                                                     PathBuf::from($c)));
+    }
+    test!("one/two/three", "../../four/five" => "four/five");
+    test!("one", "two/three" => "two/three");
+
+    // The second argument is supposed to be relative to the first, but we can resolve to something
+    // sensible anyway.
+    test!("one/two", "/absolute/path" => "/absolute/path");
+
+    // The first argument is supposed to be a relative path, but we can resolve to something
+    // sensible anyway.
+    test!("/absolute/path", "one/two" => "/absolute/one/two");
+
+    // Other cases with bad inputs:
+    test!("/one/absolute", "/two/absolute" => "/two/absolute");
+    test!("/one/absolute", "/one/more/absolute" => "/one/more/absolute");
 }
 
+/// Given a reference path relative to some unspecified base path, and a path assumed to be
+/// relative to the reference, returns the second, altered so as to be relative to the base path.
 fn resolve_path(mut reference: PathBuf, path: &PathBuf) -> PathBuf {
     reference.pop(); // remove the file name
     for c in path.components() {
