@@ -456,6 +456,14 @@ impl FSCache {
             }
         }
 
+        while self.used_bytes + (data.len() as u64) > self.max_bytes {
+            log!(self, "need to free {} bytes", self.used_bytes + (data.len() as u64) - self.max_bytes);
+            if let Err(e) = self.free_last_used_bucket() {
+                log!(self, "error freeing up space: {}", e);
+                return;
+            }
+        }
+
         let bucket_path: PathBuf = match self.get_bucket() {
             Ok(path) => path,
             Err(e) => {
@@ -505,10 +513,26 @@ impl FSCache {
         if need_to_free_bucket {
             // Something went wrong; we're not going to use this bucket.
             self.free_bucket(&bucket_path).unwrap();
+        } else {
+            self.used_bytes += data.len() as u64;
         }
     }
 
-    fn free_bucket<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
+    fn free_last_used_bucket(&mut self) -> io::Result<()> {
+        match self.bucket_list.get_tail() {
+            Some(last_used_bucket) => {
+                try!(self.free_bucket(&last_used_bucket));
+            },
+            None => {
+                log!(self, "free_last_used_bucket: there is no bucket available to free");
+            }
+        }
+        Ok(())
+    }
+
+    fn free_bucket<T: AsRef<Path> + ?Sized + Debug>(&mut self, path: &T) -> io::Result<()> {
+        log!(self, "freeing bucket {:?}", path);
+
         trylog!(self, self.bucket_list.disconnect(path),
                 "error disconnecting bucket from used list {:?}", path);
         trylog!(self, self.free_list.insert_as_tail(path),
@@ -525,23 +549,33 @@ impl FSCache {
 
         trylog!(self, link::makelink(path, "parent", None::<&Path>),
                 "error removing bucket parent link {:?}/parent", path);
-        trylog!(self, fs::remove_file(PathBuf::from(path.as_ref()).join("data")),
+
+        let data_path = PathBuf::from(path.as_ref()).join("data");
+        let data_size = {
+            let metadata = trylog!(self, fs::metadata(&data_path),
+                                   "error getting file metadata of {:?}", &data_path);
+            metadata.len()
+        };
+
+        trylog!(self, fs::remove_file(&data_path),
                 "error removing bucket data file {:?}/data", path);
 
+        log!(self, "freed {} bytes", data_size);
+        self.used_bytes -= data_size;
         Ok(())
     }
 
-    pub fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) {
+    pub fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&mut self, path: &T) {
         self.invalidate_path_internal(path, true)
     }
 
     // For use when you're going to turn around and use that path again immediately.
-    fn invalidate_path_keep_directories<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) {
+    fn invalidate_path_keep_directories<T: AsRef<Path> + ?Sized + Debug>(&mut self, path: &T) {
         self.invalidate_path_internal(path, false)
     }
 
     fn invalidate_path_internal<T: AsRef<Path> + ?Sized + Debug>(
-            &self, path: &T, remove_directories: bool) {
+            &mut self, path: &T, remove_directories: bool) {
         let map_path: PathBuf = self.map_path(path);
         log!(self, "invalidate_path: {:?}", &map_path);
 
@@ -646,7 +680,7 @@ impl FSCache {
         }
     }
 
-    pub fn free_orphaned_buckets(&self) {
+    pub fn free_orphaned_buckets(&mut self) {
         log!(self, "free_orphaned_buckets");
 
         let entries = match fs::read_dir(&self.buckets_dir) {

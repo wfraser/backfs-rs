@@ -1,8 +1,4 @@
 Remaining things to implement:
-- keep track of cache used size
-    - when writing to cache
-    - when freeing buckets
-- free buckets when max cache size is exceeded
 - free buckets when device reports out of space
 - more syscalls:
     - readlink
@@ -21,4 +17,3 @@ Remaining things to implement:
     - rename
     - link
     - chown
-
