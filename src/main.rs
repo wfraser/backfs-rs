@@ -45,8 +45,13 @@ fn main() {
     let mut settings = BackfsSettings::parse(&args);
 
     if settings.cache.is_empty() {
-        println!("Error: cache directory not specified. Use the '-o cache=<directory>' option.");
-        settings.help = true;
+        println!("Invalid options: cache directory not specified. Use the '-o cache=<directory>' option.");
+        process::exit(-1);
+    }
+
+    if settings.cache_size < settings.block_size {
+        println!("Invalid options: the max cache size cannot be less than the block size.");
+        process::exit(-1);
     }
 
     if settings.verbose {

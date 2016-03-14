@@ -146,6 +146,13 @@ impl FSCache {
 
         self.used_bytes = try!(self.compute_cache_used_size());
 
+        if self.max_bytes > 0 && self.used_bytes > self.max_bytes {
+            log!(self, "cache is over-size; freeing buckets until it is within limits");
+            while self.used_bytes > self.max_bytes {
+                try!(self.free_last_used_bucket());
+            }
+        }
+
         Ok(())
     }
 
@@ -158,6 +165,14 @@ impl FSCache {
             self.get_fs_size(&self.buckets_dir)
         } else {
             Ok(self.max_bytes)
+        }
+    }
+
+    fn free_bytes_needed_for_write(&self, size: u64) -> u64 {
+        if self.max_bytes == 0 || self.used_bytes + size <= self.max_bytes {
+            0
+        } else {
+            self.used_bytes + size - self.max_bytes
         }
     }
 
@@ -456,11 +471,16 @@ impl FSCache {
             }
         }
 
-        while self.used_bytes + (data.len() as u64) > self.max_bytes {
-            log!(self, "need to free {} bytes", self.used_bytes + (data.len() as u64) - self.max_bytes);
-            if let Err(e) = self.free_last_used_bucket() {
-                log!(self, "error freeing up space: {}", e);
-                return;
+        loop {
+            let bytes_needed = self.free_bytes_needed_for_write(data.len() as u64);
+            if bytes_needed > 0 {
+                log!(self, "need to free {} bytes", bytes_needed);
+                if let Err(e) = self.free_last_used_bucket() {
+                    log!(self, "error freeing up space: {}", e);
+                    return;
+                }
+            } else {
+                break;
             }
         }
 
@@ -786,7 +806,7 @@ impl FSCache {
                 continue;
             }
 
-            if nread < block_size as u64 {
+            if nread < block_size {
                 // we read less than requested
                 block_size = nread;
             }
