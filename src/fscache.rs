@@ -619,9 +619,6 @@ impl FSCache {
                         log!(self, "invalidate_path: invalidating {:?} - freeing {:?}",
                              entry_path, &bucket_path);
                         self.free_bucket(&bucket_path).unwrap();
-                        fs::remove_file(entry_path).unwrap();
-                    } else if entry.file_type().is_file() && entry.file_name() == "mtime" {
-                        fs::remove_file(entry_path).unwrap();
                     }
                 },
                 Err(e) => {
