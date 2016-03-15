@@ -747,10 +747,6 @@ impl FSCache {
 
         log!(self, "fetching blocks {} to {} from {:?}", first_block, last_block, path);
 
-        if first_block != 0 {
-            try!(file.seek(SeekFrom::Start(first_block * self.block_size)));
-        }
-
         let mut result: Vec<u8> = Vec::with_capacity(size as usize);
 
         for block in first_block..(last_block + 1) {
@@ -771,6 +767,9 @@ impl FSCache {
                     unsafe {
                         buf.set_len(self.block_size as usize);
                     }
+
+                    // TODO: skip this when doing contiguous reads from the file
+                    try!(file.seek(SeekFrom::Start(block * self.block_size)));
 
                     let nread = try!(file.read(&mut buf[..])) as u64;
                     log!(self, "read {} bytes", nread);
