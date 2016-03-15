@@ -6,7 +6,9 @@
 // found could cope with the odd 'mount'-style arguments this uses (i.e. -o foo, -o bar).
 //
 
+use std::borrow::Borrow;
 use std::ffi::{OsStr, OsString};
+use std::str::FromStr;
 use osstrextras::OsStrExtras;
 
 pub const USAGE: &'static str = "
@@ -45,9 +47,28 @@ pub struct BackfsSettings {
     pub backing_fs: OsString,
     pub cache_size: u64,
     pub rw: bool,
-    pub block_size: u32,
+    pub block_size: u64,
     pub foreground: bool,
     pub verbose: bool,
+}
+
+fn parse_human_number(s: &str) -> Result<u64, <u64 as FromStr>::Err> {
+    let (multiplier, s) = if s.ends_with("T") {
+        (1024 * 1024 * 1024 * 1024, s.trim_right_matches("T"))
+    } else if s.ends_with("G") {
+        (1024 * 1024 * 1024, s.trim_right_matches("G"))
+    } else if s.ends_with("M") {
+        (1024 * 1024, s.trim_right_matches("M"))
+    } else if s.ends_with("K") {
+        (1024, s.trim_right_matches("K"))
+    } else {
+        (1, s)
+    };
+
+    match s.parse::<u64>() {
+        Ok(n) => Ok(n * multiplier),
+        Err(e) => Err(e)
+    }
 }
 
 impl BackfsSettings {
@@ -126,13 +147,19 @@ impl BackfsSettings {
                 match parts[0].to_str() {
                     Some("cache") => settings.cache = parts[1].to_os_string(),
                     Some("backing_fs") => settings.backing_fs = parts[1].to_os_string(),
-                    Some("cache_size") => match parts[1].to_string_lossy().parse::<u64>() {
+                    Some("cache_size") => match parse_human_number(parts[1].to_string_lossy().borrow()) {
                         Ok(n) => { settings.cache_size = n; },
-                        Err(e) => { println!("invalid cache size: {}", e); }
+                        Err(e) => {
+                            println!("invalid cache size: {}", e);
+                            settings.help = true;
+                        }
                     },
-                    Some("block_size") => match parts[1].to_string_lossy().parse::<u32>() {
+                    Some("block_size") => match parse_human_number(parts[1].to_string_lossy().borrow()) {
                         Ok(n) => { settings.block_size = n; },
-                        Err(e) => { println!("invalid block size: {}", e); }
+                        Err(e) => {
+                            println!("invalid block size: {}", e);
+                            settings.help = true;
+                        }
                     },
                     _ => settings.fuse_options.push(parts[1].to_os_string())
                 }
