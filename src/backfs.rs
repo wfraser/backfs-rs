@@ -340,50 +340,54 @@ impl Filesystem for BackFS {
     }
 
     fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, mut reply: ReplyDirectory) {
-        if offset != 0 {
-            reply.ok();
-            return;
-        }
-
         if let Some(path) = self.inode_table.get_path(ino) {
-            log!(self, "readdir: {}", path.to_string_lossy());
+            log!(self, "readdir: {:?} @ {}", path, offset);
 
             let is_root = ino == 1;
 
-            let parent_inode = if is_root {
-                ino
-            } else {
-                let parent_path = Path::new(path.as_os_str()).parent().unwrap();
-                let parent: OsString = parent_path.to_path_buf().into_os_string();
-                log!(self, "readdir: parent of {} is {}", path.to_string_lossy(), parent.to_string_lossy());
-                match self.inode_table.get_inode(&parent) {
-                    Some(inode) => inode,
-                    None => {
-                        log!(self, "error: readdir: unable to get inode for parent of {}", path.to_string_lossy());
-                        reply.error(EIO);
-                        return;
-                    }
-                }
-            };
-
             let real = self.real_path(&path);
-            log!(self, "readdir: real = {}", real.to_string_lossy());
+            log!(self, "readdir: real = {:?}", real);
 
             match fs::read_dir(real) {
                 Ok(entries) => {
-                    reply.add(ino, 0, FileType::Directory, ".");
-                    reply.add(parent_inode, 1, FileType::Directory, "..");
-                    let mut index = 2u64;
+                    let mut index = 0u64;
 
-                    if is_root {
-                        reply.add(2, 2, FileType::RegularFile, BACKFS_CONTROL_FILE_NAME);
-                        reply.add(3, 3, FileType::RegularFile, BACKFS_VERSION_FILE_NAME);
+                    if offset == 0 {
+                        let parent_inode = if is_root {
+                            ino
+                        } else {
+                            let parent_path = Path::new(path.as_os_str()).parent().unwrap();
+                            let parent: OsString = parent_path.to_path_buf().into_os_string();
+                            log!(self, "readdir: parent of {:?} is {:?}", path, parent);
+                            match self.inode_table.get_inode(&parent) {
+                                Some(inode) => inode,
+                                None => {
+                                    log!(self, "error: readdir: unable to get inode for parent of {:?}", path);
+                                    reply.error(EIO);
+                                    return;
+                                }
+                            }
+                        };
+
+                        reply.add(ino, 0, FileType::Directory, ".");
+                        reply.add(parent_inode, 1, FileType::Directory, "..");
                         index += 2;
+
+                        if is_root {
+                            reply.add(2, 2, FileType::RegularFile, BACKFS_CONTROL_FILE_NAME);
+                            reply.add(3, 3, FileType::RegularFile, BACKFS_VERSION_FILE_NAME);
+                            index += 2;
+                        }
                     }
 
                     for entry_result in entries {
                         match entry_result {
                             Ok(entry) => {
+                                if index <= offset {
+                                    index += 1;
+                                    continue;
+                                }
+
                                 let name: OsString = entry.file_name();
 
                                 // Combine the our path and entry.
@@ -401,12 +405,13 @@ impl Filesystem for BackFS {
 
                                 log!(self, "readdir: adding entry {}: {} of type {:?}", inode, name.to_string_lossy(), filetype);
                                 let buffer_full: bool = reply.add(inode, index, filetype, name);
-                                index += 1;
 
                                 if buffer_full {
-                                    // resize the buffer
-                                    reply = reply.sized((index * 2) as usize);
+                                    log!(self, "readdir: reply buffer is full");
+                                    break;
                                 }
+
+                                index += 1;
                             },
                             Err(e) => {
                                 log!(self, "error: readdir: {}", e);
