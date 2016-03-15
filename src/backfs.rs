@@ -9,7 +9,6 @@ use std::fmt;
 use std::fs;
 use std::fs::File;
 use std::io;
-use std::ops::Div;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -108,14 +107,13 @@ fn backfs_fake_file_attr(path: Option<&str>) -> Option<FileAttr> {
     }
 }
 
-fn human_number<T: Div<u64> + PartialOrd<u64> + fmt::Display>(n: T) -> String
-                where <T as Div<u64>>::Output: fmt::Display {
+fn human_number(n: u64) -> String {
     if n >= 1024 * 1024 * 1024 {
-        format!("{} GiB", n / (1024 * 1024 * 1024))
+        format!("{:.2} GiB", n as f64 / (1024. * 1024. * 1024.))
     } else if n >= 1024 * 1024 {
-        format!("{} MiB", n / (1024 * 1024))
+        format!("{:.2} MiB", n as f64 / (1024. * 1024.))
     } else if n >= 1024 {
-        format!("{} KiB", n / (1024))
+        format!("{:.2} KiB", n as f64 / (1024.))
     } else {
         format!("{} B", n)
     }

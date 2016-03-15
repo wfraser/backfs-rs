@@ -49,7 +49,7 @@ fn main() {
         process::exit(-1);
     }
 
-    if settings.cache_size < settings.block_size {
+    if settings.cache_size != 0 && settings.cache_size < settings.block_size {
         println!("Invalid options: the max cache size cannot be less than the block size.");
         process::exit(-1);
     }

@@ -31,6 +31,7 @@ pub struct FSCache {
     max_bytes: u64,
     next_bucket_number: u64,
     pub debug: bool,
+    pub debug_fsll: bool,
 }
 
 macro_rules! log {
@@ -72,6 +73,7 @@ impl FSCache {
             max_bytes: max_bytes,
             next_bucket_number: 0u64,
             debug: false,
+            debug_fsll: false,
         }
     }
 
@@ -114,7 +116,7 @@ impl FSCache {
     }
 
     pub fn init(&mut self) -> io::Result<()> {
-        if self.debug {
+        if self.debug_fsll {
             self.bucket_list.debug = true;
             self.free_list.debug = true;
         }
@@ -617,9 +619,6 @@ impl FSCache {
                         log!(self, "invalidate_path: invalidating {:?} - freeing {:?}",
                              entry_path, &bucket_path);
                         self.free_bucket(&bucket_path).unwrap();
-                        fs::remove_file(entry_path).unwrap();
-                    } else if entry.file_type().is_file() && entry.file_name() == "mtime" {
-                        fs::remove_file(entry_path).unwrap();
                     }
                 },
                 Err(e) => {
@@ -797,9 +796,9 @@ impl FSCache {
 
             let mut block_size = if block == last_block {
                 // read ends part-way into this block
-                (offset + size) - (block * self.block_size) - block_offset
+                (offset + size) - (block * self.block_size)
             } else {
-                self.block_size - block_offset
+                self.block_size
             };
 
             if block_size == 0 {
@@ -810,6 +809,9 @@ impl FSCache {
                 // we read less than requested
                 block_size = nread;
             }
+
+            log!(self, "block_offset({}) block_size({}) nread({})",
+                 block_offset, block_size, nread);
 
             if block_offset != 0 || block_size != nread {
                 // read a slice of the block
