@@ -31,6 +31,7 @@ pub struct FSCache {
     max_bytes: u64,
     next_bucket_number: u64,
     pub debug: bool,
+    pub debug_fsll: bool,
 }
 
 macro_rules! log {
@@ -72,6 +73,7 @@ impl FSCache {
             max_bytes: max_bytes,
             next_bucket_number: 0u64,
             debug: false,
+            debug_fsll: false,
         }
     }
 
@@ -114,7 +116,7 @@ impl FSCache {
     }
 
     pub fn init(&mut self) -> io::Result<()> {
-        if self.debug {
+        if self.debug_fsll {
             self.bucket_list.debug = true;
             self.free_list.debug = true;
         }
