@@ -124,7 +124,7 @@ fn human_number<T: Div<u64> + PartialOrd<u64> + fmt::Display>(n: T) -> String
 impl BackFS {
     pub fn new(settings: BackfsSettings) -> BackFS {
         let mut backfs = BackFS {
-            fscache: FSCache::new(&settings.cache, settings.block_size as u64, settings.cache_size),
+            fscache: FSCache::new(&settings.cache, settings.block_size, settings.cache_size),
             settings: settings,
             inode_table: InodeTable::new(),
         };

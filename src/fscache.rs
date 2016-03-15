@@ -786,7 +786,7 @@ impl FSCache {
                 continue;
             }
 
-            if nread < block_size as u64 {
+            if nread < block_size {
                 // we read less than requested
                 block_size = nread;
             }
