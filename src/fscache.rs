@@ -192,15 +192,13 @@ impl FSCache {
                 continue;
             }
 
-            let bucket_number: u64 = match entry.file_name().to_str() {
-                Some(name) => {
-                    match name.parse::<u64>() {
-                        Ok(n) => n, // folder name parses as a number: consider it a bucket.
-                        Err(_) => { continue; }
-                    }
+            match entry.file_name().to_str().and_then(|name| Some(name.parse::<u64>())) {
+                Some(Err(_)) | None => {
+                    // folder name doesn't parse as a number: must not be a bucket. Skip it.
+                    continue;
                 },
-                None => { continue; }
-            };
+                Some(Ok(_)) => (),
+            }
 
             let mut path: OsString = self.buckets_dir.clone();
             path.push(&OsString::from("/"));
@@ -222,7 +220,7 @@ impl FSCache {
                 }
             };
 
-            log!(self, "bucket {}: {} bytes", bucket_number, len);
+            //log!(self, "bucket {}: {} bytes", bucket_number, len);
 
             size += len;
         }
@@ -280,7 +278,7 @@ impl FSCache {
         let mut data: Vec<u8> = Vec::with_capacity(self.block_size as usize);
         match block_file.read_to_end(&mut data) {
             Ok(nread) => {
-                log!(self, "cached_block: read {} bytes from cache", nread);
+                log!(self, "cached_block: read {:#x} bytes from cache", nread);
                 Some(data)
             },
             Err(e) => {
@@ -758,7 +756,7 @@ impl FSCache {
                     data
                 },
                 None => {
-                    log!(self, "cache miss: reading {} to {} from real file", block * self.block_size, (block + 1) * self.block_size);
+                    log!(self, "cache miss: reading {:#x} to {:#x} from real file", block * self.block_size, (block + 1) * self.block_size);
 
                     // TODO: try to write into a slice of `result` in place instead of writing to
                     // a new buffer and moving the data later.
@@ -772,7 +770,7 @@ impl FSCache {
                     try!(file.seek(SeekFrom::Start(block * self.block_size)));
 
                     let nread = try!(file.read(&mut buf[..])) as u64;
-                    log!(self, "read {} bytes", nread);
+                    log!(self, "read {:#x} bytes", nread);
 
                     if nread != self.block_size {
                         buf.truncate(nread as usize);
@@ -809,7 +807,7 @@ impl FSCache {
                 block_size = nread;
             }
 
-            log!(self, "block_offset({}) block_size({}) nread({})",
+            log!(self, "block_offset({:#x}) block_size({:#x}) nread({:#x})",
                  block_offset, block_size, nread);
 
             if block_offset != 0 || block_size != nread {

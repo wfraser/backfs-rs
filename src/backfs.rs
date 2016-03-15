@@ -146,7 +146,7 @@ impl BackFS {
 
     fn stat_real(&mut self, path: &Rc<OsString>) -> io::Result<FileAttr> {
         let real: OsString = self.real_path(&path);
-        log!(self, "stat_real: {}", real.to_string_lossy());
+        log!(self, "stat_real: {:?}", real);
 
         let metadata = try!(fs::metadata(Path::new(&real)));
 
@@ -284,7 +284,7 @@ impl Filesystem for BackFS {
                 Rc::new(path)
             };
 
-            log!(self, "lookup: {}", pathrc.to_string_lossy());
+            log!(self, "lookup: {:?}", pathrc);
 
             match backfs_fake_file_attr((*pathrc).to_str()) {
                 Some(attr) => {
@@ -299,7 +299,7 @@ impl Filesystem for BackFS {
                     reply.entry(&TTL, &attr, 0);
                 }
                 Err(e) => {
-                    log!(self, "error: lookup: {}: {}", pathrc.to_string_lossy(), e);
+                    log!(self, "error: lookup: {:?}: {}", pathrc, e);
                     reply.error(e.raw_os_error().unwrap_or(EIO));
                 }
             }
@@ -312,7 +312,7 @@ impl Filesystem for BackFS {
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         if let Some(path) = self.inode_table.get_path(ino) {
-            log!(self, "getattr: {}: {}", ino, path.to_string_lossy());
+            log!(self, "getattr: {}: {:?}", ino, path);
 
             let pathrc = Rc::new(path);
 
@@ -329,7 +329,7 @@ impl Filesystem for BackFS {
                     reply.attr(&TTL, &attr);
                 },
                 Err(e) => {
-                    log!(self, "error: getattr: inode {}, path {}: {}", ino, pathrc.to_string_lossy(), e);
+                    log!(self, "error: getattr: inode {}, path {:?}: {}", ino, pathrc, e);
                     reply.error(e.raw_os_error().unwrap_or(EIO));
                 }
             }
@@ -403,7 +403,7 @@ impl Filesystem for BackFS {
                                 let inode = self.inode_table.add_or_get(pathrc);
                                 let filetype = fuse_file_type(&entry.file_type().unwrap());
 
-                                log!(self, "readdir: adding entry {}: {} of type {:?}", inode, name.to_string_lossy(), filetype);
+                                log!(self, "readdir: adding entry {}: {:?} of type {:?}", inode, name, filetype);
                                 let buffer_full: bool = reply.add(inode, index, filetype, name);
 
                                 if buffer_full {
@@ -421,7 +421,7 @@ impl Filesystem for BackFS {
                     reply.ok();
                 },
                 Err(e) => {
-                    log!(self, "error: readdir: {}: {}", path.to_string_lossy(), e);
+                    log!(self, "error: readdir: {:?}: {}", path, e);
                     reply.error(e.raw_os_error().unwrap_or(EIO));
                 }
             }
@@ -434,7 +434,7 @@ impl Filesystem for BackFS {
 
     fn read(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, size: u32, reply: ReplyData) {
         if let Some(path) = self.inode_table.get_path(ino) {
-            log!(self, "read: {} {}@{}", path.to_string_lossy(), size, offset);
+            log!(self, "read: {:?} {:#x} @ {:#x}", path, size, offset);
 
             match path.to_str() {
                 Some(BACKFS_CONTROL_FILE_PATH) => {
@@ -478,7 +478,7 @@ impl Filesystem for BackFS {
 
     fn write(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, data: &[u8], _flags: u32, reply: ReplyWrite) {
         if let Some(path) = self.inode_table.get_path(ino) {
-            log!(self, "write: {} {}@{}", path.to_string_lossy(), data.len(), offset);
+            log!(self, "write: {:?} {:#x}@{:#x}", path, data.len(), offset);
 
             match path.to_str() {
                 Some(BACKFS_CONTROL_FILE_PATH) => {
