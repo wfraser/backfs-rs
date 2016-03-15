@@ -796,9 +796,9 @@ impl FSCache {
 
             let mut block_size = if block == last_block {
                 // read ends part-way into this block
-                (offset + size) - (block * self.block_size) - block_offset
+                (offset + size) - (block * self.block_size)
             } else {
-                self.block_size - block_offset
+                self.block_size
             };
 
             if block_size == 0 {
@@ -809,6 +809,9 @@ impl FSCache {
                 // we read less than requested
                 block_size = nread;
             }
+
+            log!(self, "block_offset({}) block_size({}) nread({})",
+                 block_offset, block_size, nread);
 
             if block_offset != 0 || block_size != nread {
                 // read a slice of the block
