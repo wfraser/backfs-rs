@@ -30,6 +30,7 @@ mod fscache;
 mod fsll;
 mod inodetable;
 mod link;
+mod log_output;
 
 mod osstrextras;
 use osstrextras::OsStrExtras;
@@ -39,6 +40,9 @@ extern crate fuse;
 extern crate libc;
 extern crate time;
 extern crate walkdir;
+
+#[macro_use]
+extern crate log;
 
 fn main() {
     let args = env::args_os().collect::<Vec<OsString>>();
@@ -96,6 +100,14 @@ fn main() {
             }
         };
     }
+
+    if settings.verbose {
+        // FSLL debug messages aren't very interesting most of the time.
+        let filters = vec![("FSLL".to_string(), log::LogLevelFilter::Warn)];
+        log_output::init(log::LogLevelFilter::Debug, filters)
+    } else {
+        log_output::init(log::LogLevelFilter::Error, vec![])
+    }.unwrap();
 
     let mut fuse_args: Vec<OsString> = vec![];
     if settings.fuse_options.len() > 0 {

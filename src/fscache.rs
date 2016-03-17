@@ -16,6 +16,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use libc::*;
+use log;
 use walkdir::WalkDir;
 
 use fsll::FSLL;
@@ -30,30 +31,44 @@ pub struct FSCache {
     used_bytes: u64,
     max_bytes: u64,
     next_bucket_number: u64,
-    pub debug: bool,
-    pub debug_fsll: bool,
 }
 
-macro_rules! log {
-    ($s:expr, $fmt:expr) => ($s.log(format_args!(concat!("FSCache: ", $fmt, "\n"))));
-    ($s:expr, $fmt:expr, $($arg:tt)*) => ($s.log(format_args!(concat!("FSCache: ", $fmt, "\n"), $($arg)*)));
+macro_rules! log2 {
+    ($lvl:expr, $($arg:tt)+) => (
+        log!(target: "FSCache", $lvl, $($arg)+));
+}
+
+macro_rules! error {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Error, $($arg)+));
+}
+
+macro_rules! warn {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Warn, $($arg)+));
+}
+
+macro_rules! info {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Info, $($arg)+));
+}
+
+macro_rules! debug {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Debug, $($arg)+));
 }
 
 macro_rules! trylog {
-    ($s:expr, $e:expr, $fmt:expr) => {
+    ($e:expr, $fmt:expr) => {
         match $e {
             Ok(x) => x,
             Err(e) => {
-                $s.log(format_args!(concat!("FSCache: ", $fmt, ": {}\n"), e));
+                error!(concat!($fmt, ": {}\n"), e);
                 return Err(e);
             }
         }
     };
-    ($s:expr, $e:expr, $fmt:expr, $($arg:tt)*) => {
+    ($e:expr, $fmt:expr, $($arg:tt)*) => {
         match $e {
             Ok(x) => x,
             Err(e) => {
-                $s.log(format_args!(concat!("FSCache: ", $fmt, ": {}\n"), $($arg)*, e));
+                error!(concat!($fmt, ": {}\n"), $($arg)*, e);
                 return Err(e);
             },
         }
@@ -72,8 +87,6 @@ impl FSCache {
             used_bytes: 0u64,
             max_bytes: max_bytes,
             next_bucket_number: 0u64,
-            debug: false,
-            debug_fsll: false,
         }
     }
 
@@ -82,7 +95,7 @@ impl FSCache {
         if let Err(e) = fs::create_dir(&path) {
             // Already existing is fine.
             if e.raw_os_error() != Some(EEXIST) {
-                log!(self, "error: unable to create {:?}: {}", pathstr, e);
+                error!("unable to create {:?}: {}", pathstr, e);
                 return Err(e);
             }
         }
@@ -95,7 +108,7 @@ impl FSCache {
             let path_c = CString::from_vec_unchecked(Vec::from(pathstr.as_bytes()));
             if 0 != access(path_c.as_ptr(), R_OK | W_OK | X_OK) {
                 let e = io::Error::last_os_error();
-                log!(self, "error: no R/W/X access to {:?}: {}", pathstr, e);
+                error!("no R/W/X access to {:?}: {}", pathstr, e);
                 return Err(e);
             }
         }
@@ -116,31 +129,26 @@ impl FSCache {
     }
 
     pub fn init(&mut self) -> io::Result<()> {
-        if self.debug_fsll {
-            self.bucket_list.debug = true;
-            self.free_list.debug = true;
-        }
-
         try!(self.create_dir_and_check_access(&self.buckets_dir));
         try!(self.create_dir_and_check_access(&self.map_dir));
 
         self.next_bucket_number = try!(self.read_next_bucket_number());
-        log!(self, "next bucket number: {}", self.next_bucket_number);
+        info!("next bucket number: {}", self.next_bucket_number);
 
         match self.read_number_file(&PathBuf::from(&self.buckets_dir).join("bucket_size"), Some(self.block_size)) {
             Ok(Some(size)) => {
                 if size != self.block_size {
                     let msg = format!(
-                        "error: block size in cache ({}) doesn't match the size in the options ({})",
+                        "block size in cache ({}) doesn't match the size in the options ({})",
                         size,
                         self.block_size);
-                    log!(self, "{}", msg);
+                    error!("{}", msg);
                     return Err(io::Error::new(io::ErrorKind::Other, msg));
                 }
             },
             Err(e) => {
                 let msg = format!("error reading bucket_size file: {}", e);
-                log!(self, "{}", msg);
+                error!("{}", msg);
                 return Err(io::Error::new(io::ErrorKind::Other, msg));
             },
             Ok(None) => unreachable!()
@@ -149,7 +157,7 @@ impl FSCache {
         self.used_bytes = try!(self.compute_cache_used_size());
 
         if self.max_bytes > 0 && self.used_bytes > self.max_bytes {
-            log!(self, "cache is over-size; freeing buckets until it is within limits");
+            warn!("cache is over-size; freeing buckets until it is within limits");
             while self.used_bytes > self.max_bytes {
                 try!(self.free_last_used_bucket());
             }
@@ -181,12 +189,12 @@ impl FSCache {
     fn compute_cache_used_size(&mut self) -> io::Result<u64> {
         let mut size = 0u64;
 
-        let readdir = trylog!(self, fs::read_dir(Path::new(&self.buckets_dir)),
+        let readdir = trylog!(fs::read_dir(Path::new(&self.buckets_dir)),
                               "error getting directory listing for bucket directory");
 
         for entry_result in readdir {
-            let entry = trylog!(self, entry_result, "error reading directory entry");
-            let filetype = trylog!(self, entry.file_type(),
+            let entry = trylog!(entry_result, "error reading directory entry");
+            let filetype = trylog!(entry.file_type(),
                                    "error getting file type of {:?}", entry.file_name());
             if !filetype.is_dir() {
                 continue;
@@ -207,25 +215,23 @@ impl FSCache {
 
             let len = match fs::File::open(&path) {
                 Ok(file) => {
-                    trylog!(self, file.metadata().and_then(|m| Ok(m.len())),
+                    trylog!(file.metadata().and_then(|m| Ok(m.len())),
                             "failed to get data file metadata from {:?}", path)
                 },
                 Err(e) => {
                     if e.raw_os_error() == Some(ENOENT) {
                         0
                     } else {
-                        log!(self, "failed to open data file {:?}: {}", path, e);
+                        error!("failed to open data file {:?}: {}", path, e);
                         return Err(e);
                     }
                 }
             };
 
-            //log!(self, "bucket {}: {} bytes", bucket_number, len);
-
             size += len;
         }
 
-        log!(self, "cache used size: {} bytes", size);
+        info!("cache used size: {} bytes", size);
 
         Ok(size)
     }
@@ -244,22 +250,16 @@ impl FSCache {
         map_path
     }
 
-    fn log(&self, args: fmt::Arguments) {
-        if self.debug {
-            io::stdout().write_fmt(args).unwrap();
-        }
-    }
-
     fn cached_block(&self, path: &OsStr, block: u64) -> Option<Vec<u8>> {
         let bucket_path = match link::getlink(&self.map_path(path), &format!("{}", block)) {
             Ok(Some(path)) => { path },
             Ok(None) => { return None; }
             Err(e) => {
-                log!(self, "warning: cached_block error looking up {:?}/{}: {}", path, block, e);
+                warn!("cached_block error looking up {:?}/{}: {}", path, block, e);
                 return None;
             }
         };
-        log!(self, "cached_block: bucket path: {:?}", bucket_path);
+        debug!("cached_block: bucket path: {:?}", bucket_path);
 
         if self.bucket_list.to_head(&bucket_path).is_err() {
             // If something's wrong with FSLL, don't read from cache.
@@ -270,7 +270,7 @@ impl FSCache {
         let mut block_file: File = match File::open(&data_path) {
             Ok(file) => file,
             Err(e) => {
-                log!(self, "warning: cached_block error opening bucket data file {:?}: {}", data_path, e);
+                warn!("cached_block error opening bucket data file {:?}: {}", data_path, e);
                 return None;
             }
         };
@@ -278,11 +278,11 @@ impl FSCache {
         let mut data: Vec<u8> = Vec::with_capacity(self.block_size as usize);
         match block_file.read_to_end(&mut data) {
             Ok(nread) => {
-                log!(self, "cached_block: read {:#x} bytes from cache", nread);
+                debug!("cached_block: read {:#x} bytes from cache", nread);
                 Some(data)
             },
             Err(e) => {
-                log!(self, "warning: cached_block reading from data file {:?}: {}", data_path, e);
+                warn!("cached_block reading from data file {:?}: {}", data_path, e);
                 None
             }
         }
@@ -303,12 +303,12 @@ impl FSCache {
                                       .open(path) {
                         Ok(file) => Ok((file, true)),
                         Err(e) => {
-                            log!(self, "error creating file {:?}: {}", path, e);
+                            error!("error creating file {:?}: {}", path, e);
                             Err(e)
                         }
                     }
                 } else {
-                    log!(self, "error opening file {:?}: {}", path, e);
+                    error!("error opening file {:?}: {}", path, e);
                     Err(e)
                 }
             }
@@ -345,7 +345,7 @@ impl FSCache {
                 Some(n) => match write!(file, "{}", n) {
                     Ok(_) => Ok(Some(n)),
                     Err(e) => {
-                        log!(self, "error writing to {:?}: {}", path, e);
+                        error!("error writing to {:?}: {}", path, e);
                         Err(e)
                     }
                 },
@@ -353,14 +353,14 @@ impl FSCache {
             }
         } else {
             let mut data: Vec<u8> = vec![];
-            trylog!(self, file.read_to_end(&mut data),
-                "error reading from {:?}", path);
+            trylog!(file.read_to_end(&mut data),
+                    "error reading from {:?}", path);
 
             let string = match String::from_utf8(data) {
                 Ok(s) => s,
                 Err(e) => {
                     let msg = format!("error interpreting file {:?} as UTF8 string: {}", path, e);
-                    log!(self, "{}", msg);
+                    error!("{}", msg);
                     return Err(io::Error::new(io::ErrorKind::Other, msg));
                 }
             };
@@ -369,7 +369,7 @@ impl FSCache {
                 Ok(n) => n,
                 Err(e) => {
                     let msg = format!("error interpreting file {:?} as number: {:?}", path, e);
-                    log!(self, "{}", msg);
+                    error!("{}", msg);
                     return Err(io::Error::new(io::ErrorKind::Other, msg));
                 }
             };
@@ -390,11 +390,11 @@ impl FSCache {
                           .create(true)
                           .open(&path) {
             Ok(mut file) => {
-                trylog!(self, write!(file, "{}", number),
-                    "error writing to {:?}", path);
+                trylog!(write!(file, "{}", number),
+                        "error writing to {:?}", path);
             },
             Err(e) => {
-                log!(self, "error opening {:?}: {}", path, e);
+                error!("error opening {:?}: {}", path, e);
                 return Err(e);
             }
         }
@@ -405,7 +405,7 @@ impl FSCache {
         let mtime_path: PathBuf = self.map_path(path).join("mtime");
 
         self.read_number_file(&mtime_path, None::<i64>).unwrap_or_else(|e| {
-            log!(self, "warning: error in mtime file {:?}: {}", &mtime_path, e);
+            error!("problem with mtime file {:?}: {}", &mtime_path, e);
             None
         })
     }
@@ -427,23 +427,23 @@ impl FSCache {
 
     fn new_bucket(&mut self) -> io::Result<PathBuf> {
         let bucket_path = PathBuf::from(&self.buckets_dir).join(format!("{}", self.next_bucket_number));
-        trylog!(self, fs::create_dir(&bucket_path),
-            "error creating bucket directory {:?}", bucket_path);
+        trylog!(fs::create_dir(&bucket_path),
+                "error creating bucket directory {:?}", bucket_path);
         self.next_bucket_number += 1;
-        trylog!(self, self.write_next_bucket_number(self.next_bucket_number),
-            "error writing next bucket number");
-        trylog!(self, self.bucket_list.insert_as_head(&bucket_path),
-            "error setting bucket as head of used list");
+        trylog!(self.write_next_bucket_number(self.next_bucket_number),
+                "error writing next bucket number");
+        trylog!(self.bucket_list.insert_as_head(&bucket_path),
+                "error setting bucket as head of used list");
         Ok(bucket_path)
     }
 
     fn get_bucket(&mut self) -> io::Result<PathBuf> {
         if self.free_list.is_empty() {
-            log!(self, "making new bucket");
+            debug!("making new bucket");
             self.new_bucket()
         } else {
             let free_bucket: PathBuf = self.free_list.get_tail().unwrap();
-            log!(self, "re-using free bucket {:?}", free_bucket);
+            debug!("re-using free bucket {:?}", free_bucket);
             try!(self.free_list.disconnect(&free_bucket));
             try!(self.bucket_list.insert_as_head(&free_bucket));
             Ok(free_bucket)
@@ -456,17 +456,17 @@ impl FSCache {
         let cached_mtime: Option<i64> = self.cached_mtime(path);
         if cached_mtime != Some(mtime) {
             if cached_mtime.is_some() {
-                log!(self, "write_block_to_cache: existing mtime is stale; invalidating {:?}", path);
+                info!("write_block_to_cache: existing mtime is stale; invalidating {:?}", path);
                 self.invalidate_path_keep_directories(path);
             } else {
                 if let Err(e) = fs::create_dir_all(&map_path) {
-                    log!(self, "error creating map directory {:?}: {}", map_path, e);
+                    error!("error creating map directory {:?}: {}", map_path, e);
                     return;
                 }
             }
 
             if let Err(e) = self.write_mtime(path, mtime) {
-                log!(self, "error writing mtime file; not writing data to cache: {}", e);
+                error!("error writing mtime file; not writing data to cache: {}", e);
                 return;
             }
         }
@@ -474,9 +474,9 @@ impl FSCache {
         loop {
             let bytes_needed = self.free_bytes_needed_for_write(data.len() as u64);
             if bytes_needed > 0 {
-                log!(self, "need to free {} bytes", bytes_needed);
+                info!("need to free {} bytes", bytes_needed);
                 if let Err(e) = self.free_last_used_bucket() {
-                    log!(self, "error freeing up space: {}", e);
+                    error!("error freeing up space: {}", e);
                     return;
                 }
             } else {
@@ -487,7 +487,7 @@ impl FSCache {
         let bucket_path: PathBuf = match self.get_bucket() {
             Ok(path) => path,
             Err(e) => {
-                log!(self, "error getting bucket: {}", e);
+                error!("error getting bucket: {}", e);
                 return;
             }
         };
@@ -507,25 +507,25 @@ impl FSCache {
                                                      Some(&map_path.join(format!("{}", block)))) {
                                     Ok(()) => false,
                                     Err(e) => {
-                                        log!(self, "error symlinking bucket to its parent: {}", e);
+                                        error!("error symlinking bucket to its parent: {}", e);
                                         true
                                     }
                                 }
                             }
                             Err(e) => {
-                                log!(self, "error symlinking cache bucket into map: {}", e);
+                                error!("error symlinking cache bucket into map: {}", e);
                                 true
                             }
                         }
                     },
                     Err(e) => {
-                        log!(self, "error writing to cache data file: {}", e);
+                        error!("error writing to cache data file: {}", e);
                         true
                     }
                 }
             }
             Err(e) => {
-                log!(self, "write_block_to_cache: error opening data file {:?}: {}", data_path, e);
+                error!("write_block_to_cache: error opening data file {:?}: {}", data_path, e);
                 true
             }
         };
@@ -544,43 +544,43 @@ impl FSCache {
                 try!(self.free_bucket(&last_used_bucket));
             },
             None => {
-                log!(self, "free_last_used_bucket: there is no bucket available to free");
+                error!("free_last_used_bucket: there is no bucket available to free");
             }
         }
         Ok(())
     }
 
     fn free_bucket<T: AsRef<Path> + ?Sized + Debug>(&mut self, path: &T) -> io::Result<()> {
-        log!(self, "freeing bucket {:?}", path);
+        debug!("freeing bucket {:?}", path);
 
-        trylog!(self, self.bucket_list.disconnect(path),
+        trylog!(self.bucket_list.disconnect(path),
                 "error disconnecting bucket from used list {:?}", path);
-        trylog!(self, self.free_list.insert_as_tail(path),
+        trylog!(self.free_list.insert_as_tail(path),
                 "error inserting bucket into free list {:?}", path);
 
         // Remove the parent link if there is one.
-        if let Some(parent_path) = trylog!(self, link::getlink(path, "parent"),
+        if let Some(parent_path) = trylog!(link::getlink(path, "parent"),
                                            "error reading parent link from bucket {:?}", path) {
-            log!(self, "removing parent {:?}", &parent_path);
-            trylog!(self, link::makelink("", &parent_path, None::<&Path>),
+            debug!("removing parent {:?}", &parent_path);
+            trylog!(link::makelink("", &parent_path, None::<&Path>),
                     "error removing parent link-back {:?}", parent_path);
             self.trim_empty_directories(&parent_path);
         }
 
-        trylog!(self, link::makelink(path, "parent", None::<&Path>),
+        trylog!(link::makelink(path, "parent", None::<&Path>),
                 "error removing bucket parent link {:?}/parent", path);
 
         let data_path = PathBuf::from(path.as_ref()).join("data");
         let data_size = {
-            let metadata = trylog!(self, fs::metadata(&data_path),
+            let metadata = trylog!(fs::metadata(&data_path),
                                    "error getting file metadata of {:?}", &data_path);
             metadata.len()
         };
 
-        trylog!(self, fs::remove_file(&data_path),
+        trylog!(fs::remove_file(&data_path),
                 "error removing bucket data file {:?}/data", path);
 
-        log!(self, "freed {} bytes", data_size);
+        info!("freed {} bytes", data_size);
         self.used_bytes -= data_size;
         Ok(())
     }
@@ -597,7 +597,7 @@ impl FSCache {
     fn invalidate_path_internal<T: AsRef<Path> + ?Sized + Debug>(
             &mut self, path: &T, remove_directories: bool) {
         let map_path: PathBuf = self.map_path(path);
-        log!(self, "invalidate_path: {:?}", &map_path);
+        debug!("invalidate_path: {:?}", &map_path);
 
         for entry_result in WalkDir::new(&map_path) {
             match entry_result {
@@ -607,14 +607,14 @@ impl FSCache {
                         let bucket_path = match link::getlink("", entry_path) {
                             Ok(Some(path)) => path,
                             Err(e) => {
-                                log!(self, "invalidate_path: error reading link {:?}: {}",
+                                error!("invalidate_path: error reading link {:?}: {}",
                                      entry.path(), e);
                                 continue;
                             },
                             Ok(None) => unreachable!()
                         };
 
-                        log!(self, "invalidate_path: invalidating {:?} - freeing {:?}",
+                        debug!("invalidate_path: invalidating {:?} - freeing {:?}",
                              entry_path, &bucket_path);
                         self.free_bucket(&bucket_path).unwrap();
                     }
@@ -626,7 +626,7 @@ impl FSCache {
                         // If the map directory doesn't exist, there's nothing to do.
                         return;
                     } else {
-                        log!(self, "invalidate_path: error reading directory entry from {:?}: {:?}",
+                        error!("invalidate_path: error reading directory entry from {:?}: {:?}",
                              map_path, ioerr);
                     }
                 }
@@ -655,12 +655,12 @@ impl FSCache {
 
             if let Err(e) = fs::remove_dir(parent_path) {
                 if e.raw_os_error() != Some(ENOTEMPTY) {
-                    log!(self, "invalidate_path: failed to remove empty map directory {:?}: {}",
+                    error!("invalidate_path: failed to remove empty map directory {:?}: {}",
                          parent_path, e);
                 }
                 break;
             } else {
-                log!(self, "invalidate_path: removed empty map directory {:?}", parent_path);
+                debug!("invalidate_path: removed empty map directory {:?}", parent_path);
             }
         }
     }
@@ -670,7 +670,7 @@ impl FSCache {
             Ok(Some(path)) => path,
             Ok(None) => { return false; },
             Err(e) => {
-                log!(self, "is_bucket_orphaned: error reading parent link of {:?}: {}", path, e);
+                error!("is_bucket_orphaned: error reading parent link of {:?}: {}", path, e);
                 return false;
             }
         };
@@ -678,18 +678,18 @@ impl FSCache {
         let parent_link_back = match link::getlink("", &parent) {
             Ok(Some(path)) => path,
             Ok(None) => {
-                log!(self, "bucket is orphaned - no link back from parent: {:?} -> {:?}",
+                info!("bucket is orphaned - no link back from parent: {:?} -> {:?}",
                      path, parent);
                 return true;
             },
             Err(e) => {
-                log!(self, "is_bucket_orphaned: error reading link back from {:?}: {}", parent, e);
+                error!("is_bucket_orphaned: error reading link back from {:?}: {}", parent, e);
                 return true;
             },
         };
 
         if parent_link_back != path.as_ref() {
-            log!(self, "bucket is orphaned - parent links elsewhere: {:?} -> {:?} -> {:?}",
+            info!("bucket is orphaned - parent links elsewhere: {:?} -> {:?} -> {:?}",
                  path, parent, parent_link_back);
             true
         } else {
@@ -698,12 +698,12 @@ impl FSCache {
     }
 
     pub fn free_orphaned_buckets(&mut self) {
-        log!(self, "free_orphaned_buckets");
+        debug!("free_orphaned_buckets");
 
         let entries = match fs::read_dir(&self.buckets_dir) {
             Ok(entries) => entries,
             Err(e) => {
-                log!(self, "free_orphaned_buckets: error opening buckets directory: {}", e);
+                error!("free_orphaned_buckets: error opening buckets directory: {}", e);
                 return;
             }
         };
@@ -715,14 +715,14 @@ impl FSCache {
                         let entry_path = entry.path();
                         if self.is_bucket_orphaned(&entry_path) {
                             if let Err(e) = self.free_bucket(&entry_path) {
-                                log!(self, "free_orphaned_buckets: error freeing {:?}: {}",
+                                error!("free_orphaned_buckets: error freeing {:?}: {}",
                                      entry_path, e);
                             }
                         }
                     }
                 },
                 Err(e) => {
-                    log!(self, "free_orphaned_buckets: error listing buckets directory: {}", e);
+                    error!("free_orphaned_buckets: error listing buckets directory: {}", e);
                     return;
                 }
             }
@@ -735,7 +735,7 @@ impl FSCache {
         let cached_mtime = self.cached_mtime(path);
         if cached_mtime != Some(mtime) {
             if cached_mtime.is_some() {
-                log!(self, "cached data is stale, invalidating: {:?}", path);
+                info!("cached data is stale, invalidating: {:?}", path);
             }
             self.invalidate_path_keep_directories(path);
         }
@@ -743,20 +743,23 @@ impl FSCache {
         let first_block = offset / self.block_size;
         let last_block  = (offset + size - 1) / self.block_size;
 
-        log!(self, "fetching blocks {} to {} from {:?}", first_block, last_block, path);
+        debug!("fetching blocks {} to {} from {:?}", first_block, last_block, path);
 
         let mut result: Vec<u8> = Vec::with_capacity(size as usize);
 
         for block in first_block..(last_block + 1) {
-            log!(self, "fetching block {}", block);
+            debug!("fetching block {}", block);
 
             let mut block_data = match self.cached_block(path, block) {
                 Some(data) => {
-                    log!(self, "cache hit");
+                    info!("cache hit: got {:#x} to {:#x} from {:?}",
+                          block * self.block_size,
+                          block * self.block_size + data.len() as u64,
+                          path);
                     data
                 },
                 None => {
-                    log!(self, "cache miss: reading {:#x} to {:#x} from real file", block * self.block_size, (block + 1) * self.block_size);
+                    info!("cache miss: reading {:#x} to {:#x} from {:?}", block * self.block_size, (block + 1) * self.block_size, path);
 
                     // TODO: try to write into a slice of `result` in place instead of writing to
                     // a new buffer and moving the data later.
@@ -770,7 +773,7 @@ impl FSCache {
                     try!(file.seek(SeekFrom::Start(block * self.block_size)));
 
                     let nread = try!(file.read(&mut buf[..])) as u64;
-                    log!(self, "read {:#x} bytes", nread);
+                    debug!("read {:#x} bytes", nread);
 
                     if nread != self.block_size {
                         buf.truncate(nread as usize);
@@ -807,7 +810,7 @@ impl FSCache {
                 block_size = nread;
             }
 
-            log!(self, "block_offset({:#x}) block_size({:#x}) nread({:#x})",
+            debug!("block_offset({:#x}) block_size({:#x}) nread({:#x})",
                  block_offset, block_size, nread);
 
             if block_offset != 0 || block_size != nread {
@@ -826,7 +829,7 @@ impl FSCache {
             if nread < self.block_size {
                 // if we read less than requested, we're done.
                 if block < last_block {
-                    log!(self, "warning: read fewer blocks than requested");
+                    warn!("read fewer blocks than requested from {:?}", path);
                 }
                 break;
             }

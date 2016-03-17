@@ -5,7 +5,6 @@
 
 use std::cmp;
 use std::ffi::{OsStr, OsString};
-use std::fmt;
 use std::fs;
 use std::fs::File;
 use std::io;
@@ -22,6 +21,7 @@ use fscache::FSCache;
 use daemonize::Daemonize;
 use fuse::{FileType, FileAttr, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyWrite, Request};
 use libc::*;
+use log;
 use time::Timespec;
 
 pub const BACKFS_VERSION: &'static str = "BackFS version: 0.1.0\n";
@@ -61,9 +61,25 @@ pub struct BackFS {
     fscache: FSCache,
 }
 
-macro_rules! log {
-    ($s:expr, $fmt:expr) => ($s.log(format_args!($fmt)));
-    ($s:expr, $fmt:expr, $($arg:tt)*) => ($s.log(format_args!($fmt, $($arg)*)));
+macro_rules! log2 {
+    ($lvl:expr, $($arg:tt)+) => (
+        log!(target: "BackFS", $lvl, $($arg)+));
+}
+
+macro_rules! error {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Error, $($arg)+));
+}
+
+macro_rules! warn {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Warn, $($arg)+));
+}
+
+macro_rules! info {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Info, $($arg)+));
+}
+
+macro_rules! debug {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Debug, $($arg)+));
 }
 
 fn fuse_file_type(ft: &fs::FileType) -> FileType {
@@ -80,7 +96,7 @@ fn fuse_file_type(ft: &fs::FileType) -> FileType {
     } else if ft.is_fifo() {
         FileType::NamedPipe
     } else if ft.is_socket() {
-        // ???
+        warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
         FileType::NamedPipe
     } else {
         panic!("unknown file type");
@@ -121,20 +137,10 @@ fn human_number(n: u64) -> String {
 
 impl BackFS {
     pub fn new(settings: BackfsSettings) -> BackFS {
-        let mut backfs = BackFS {
+        BackFS {
             fscache: FSCache::new(&settings.cache, settings.block_size, settings.cache_size),
             settings: settings,
             inode_table: InodeTable::new(),
-        };
-        if backfs.settings.verbose {
-            backfs.fscache.debug = true;
-        }
-        backfs
-    }
-
-    fn log(&self, args: fmt::Arguments) {
-        if self.settings.verbose {
-            println!("BackFS: {}", fmt::format(args));
         }
     }
 
@@ -146,7 +152,7 @@ impl BackFS {
 
     fn stat_real(&mut self, path: &Rc<OsString>) -> io::Result<FileAttr> {
         let real: OsString = self.real_path(&path);
-        log!(self, "stat_real: {:?}", real);
+        debug!("stat_real: {:?}", real);
 
         let metadata = try!(fs::metadata(Path::new(&real)));
 
@@ -190,7 +196,7 @@ impl BackFS {
         let arg_start = if arg_bytes.is_empty() { 0 } else { 1 }; // skip over the space delimiter if there is one
         let arg = OsStr::from_bytes(&arg_bytes[arg_start..]);
 
-        log!(self, "command: {:?}, arg: {:?}", command, arg);
+        debug!("command: {:?}, arg: {:?}", command, arg);
 
         match command {
             "test" => {
@@ -247,7 +253,7 @@ impl BackFS {
 
 impl Filesystem for BackFS {
     fn init(&mut self, _req: &Request) -> Result<(), c_int> {
-        log!(self, "init");
+        debug!("init");
 
         if let Err(e) = self.internal_init() {
             println!("Error initializing BackFS: {}", e);
@@ -268,7 +274,7 @@ impl Filesystem for BackFS {
     }
 
     fn destroy(&mut self, _req: &Request) {
-        log!(self, "destroy");
+        debug!("destroy");
     }
 
     fn lookup(&mut self, _req: &Request, parent: u64, name: &Path, reply: ReplyEntry) {
@@ -284,7 +290,7 @@ impl Filesystem for BackFS {
                 Rc::new(path)
             };
 
-            log!(self, "lookup: {:?}", pathrc);
+            debug!("lookup: {:?}", pathrc);
 
             match backfs_fake_file_attr((*pathrc).to_str()) {
                 Some(attr) => {
@@ -299,20 +305,20 @@ impl Filesystem for BackFS {
                     reply.entry(&TTL, &attr, 0);
                 }
                 Err(e) => {
-                    log!(self, "error: lookup: {:?}: {}", pathrc, e);
+                    error!("lookup: {:?}: {}", pathrc, e);
                     reply.error(e.raw_os_error().unwrap_or(EIO));
                 }
             }
 
         } else {
-            log!(self, "error: lookup: could not resolve parent inode {}", parent);
+            error!("lookup: could not resolve parent inode {}", parent);
             reply.error(ENOENT);
         }
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         if let Some(path) = self.inode_table.get_path(ino) {
-            log!(self, "getattr: {}: {:?}", ino, path);
+            debug!("getattr: {}: {:?}", ino, path);
 
             let pathrc = Rc::new(path);
 
@@ -329,24 +335,24 @@ impl Filesystem for BackFS {
                     reply.attr(&TTL, &attr);
                 },
                 Err(e) => {
-                    log!(self, "error: getattr: inode {}, path {:?}: {}", ino, pathrc, e);
+                    error!("getattr: inode {}, path {:?}: {}", ino, pathrc, e);
                     reply.error(e.raw_os_error().unwrap_or(EIO));
                 }
             }
         } else {
-            log!(self, "error: getattr: could not resolve inode {}", ino);
+            error!("getattr: could not resolve inode {}", ino);
             reply.error(ENOENT);
         }
     }
 
     fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, mut reply: ReplyDirectory) {
         if let Some(path) = self.inode_table.get_path(ino) {
-            log!(self, "readdir: {:?} @ {}", path, offset);
+            debug!("readdir: {:?} @ {}", path, offset);
 
             let is_root = ino == 1;
 
             let real = self.real_path(&path);
-            log!(self, "readdir: real = {:?}", real);
+            debug!("readdir: real = {:?}", real);
 
             match fs::read_dir(real) {
                 Ok(entries) => {
@@ -358,11 +364,11 @@ impl Filesystem for BackFS {
                         } else {
                             let parent_path = Path::new(path.as_os_str()).parent().unwrap();
                             let parent: OsString = parent_path.to_path_buf().into_os_string();
-                            log!(self, "readdir: parent of {:?} is {:?}", path, parent);
+                            debug!("readdir: parent of {:?} is {:?}", path, parent);
                             match self.inode_table.get_inode(&parent) {
                                 Some(inode) => inode,
                                 None => {
-                                    log!(self, "error: readdir: unable to get inode for parent of {:?}", path);
+                                    error!("readdir: unable to get inode for parent of {:?}", path);
                                     reply.error(EIO);
                                     return;
                                 }
@@ -403,38 +409,38 @@ impl Filesystem for BackFS {
                                 let inode = self.inode_table.add_or_get(pathrc);
                                 let filetype = fuse_file_type(&entry.file_type().unwrap());
 
-                                log!(self, "readdir: adding entry {}: {:?} of type {:?}", inode, name, filetype);
+                                debug!("readdir: adding entry {}: {:?} of type {:?}", inode, name, filetype);
                                 let buffer_full: bool = reply.add(inode, index, filetype, name);
 
                                 if buffer_full {
-                                    log!(self, "readdir: reply buffer is full");
+                                    debug!("readdir: reply buffer is full");
                                     break;
                                 }
 
                                 index += 1;
                             },
                             Err(e) => {
-                                log!(self, "error: readdir: {}", e);
+                                error!("readdir: {}", e);
                             }
                         }
                     }
                     reply.ok();
                 },
                 Err(e) => {
-                    log!(self, "error: readdir: {:?}: {}", path, e);
+                    error!("readdir: {:?}: {}", path, e);
                     reply.error(e.raw_os_error().unwrap_or(EIO));
                 }
             }
 
         } else {
-            log!(self, "error: readdir: could not resolve inode {}", ino);
+            error!("readdir: could not resolve inode {}", ino);
             reply.error(ENOENT);
         }
     }
 
     fn read(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, size: u32, reply: ReplyData) {
         if let Some(path) = self.inode_table.get_path(ino) {
-            log!(self, "read: {:?} {:#x} @ {:#x}", path, size, offset);
+            debug!("read: {:?} {:#x} @ {:#x}", path, size, offset);
 
             match path.to_str() {
                 Some(BACKFS_CONTROL_FILE_PATH) => {
@@ -471,14 +477,14 @@ impl Filesystem for BackFS {
             }
 
         } else {
-            log!(self, "error: read: could not resolve inode {}", ino);
+            error!("read: could not resolve inode {}", ino);
             reply.error(ENOENT);
         }
     }
 
     fn write(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, data: &[u8], _flags: u32, reply: ReplyWrite) {
         if let Some(path) = self.inode_table.get_path(ino) {
-            log!(self, "write: {:?} {:#x}@{:#x}", path, data.len(), offset);
+            debug!("write: {:?} {:#x}@{:#x}", path, data.len(), offset);
 
             match path.to_str() {
                 Some(BACKFS_CONTROL_FILE_PATH) => {
@@ -500,7 +506,7 @@ impl Filesystem for BackFS {
             // TODO
             reply.error(ENOSYS);
         } else {
-            log!(self, "error: write: could not resolve inode {}", ino);
+            error!("write: could not resolve inode {}", ino);
             reply.error(ENOENT);
         }
     }
