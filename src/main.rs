@@ -48,66 +48,70 @@ fn main() {
     let args = env::args_os().collect::<Vec<OsString>>();
     let mut settings = BackfsSettings::parse(&args);
 
-    if settings.cache.is_empty() {
-        println!("Invalid options: cache directory not specified. Use the '-o cache=<directory>' option.");
-        process::exit(-1);
-    }
-
-    if settings.cache_size != 0 && settings.cache_size < settings.block_size {
-        println!("Invalid options: the max cache size cannot be less than the block size.");
-        process::exit(-1);
-    }
-
     if settings.verbose {
         println!("{:?}", settings);
     }
 
-    if settings.help {
-        println!("{}\nFUSE options:", arg_parse::USAGE);
-        settings.fuse_options.push(OsString::from("--help"));
-        settings.mount_point = OsString::from(".");  // placate the mount call
-    }
+    if settings.help || settings.version {
+        if settings.help {
+            println!("{}\nFUSE options:", arg_parse::USAGE);
+            settings.fuse_options.push(OsString::from("--help"));
+            settings.mount_point = OsString::from(".");  // placate the mount call
+            settings.backing_fs = OsString::from(".");
+        }
 
-    if settings.version {
-        print!("{}", backfs::BACKFS_VERSION);
-        settings.fuse_options.push(OsString::from("--version"));
-        settings.mount_point = OsString::from(".");  // placate the mount call
-    }
-
-    if settings.foreground {
-        // have FUSE automatically unmount when the process exits.
-        settings.fuse_options.push(OsString::from("auto_unmount"));
+        if settings.version {
+            print!("{}", backfs::BACKFS_VERSION);
+            settings.fuse_options.push(OsString::from("--version"));
+            settings.mount_point = OsString::from(".");  // placate the mount call
+            settings.backing_fs = OsString::from(".");
+        }
     } else {
-        settings.mount_point = match fs::canonicalize(settings.mount_point) {
-            Ok(pathbuf) => pathbuf.into_os_string(),
-            Err(e) => {
-                println!("error canonicalizing mount point: {}", e);
-                process::exit(1);
-            }
-        };
-        settings.backing_fs = match fs::canonicalize(settings.backing_fs) {
-            Ok(pathbuf) => pathbuf.into_os_string(),
-            Err(e) => {
-                println!("error canonicalizing backing filesystem path: {}", e);
-                process::exit(1);
-            }
-        };
-        settings.cache = match fs::canonicalize(settings.cache) {
-            Ok(pathbuf) => pathbuf.into_os_string(),
-            Err(e) => {
-                println!("error canonicalizing cache path: {}", e);
-                process::exit(1);
-            }
-        };
-    }
+        if settings.cache_size != 0 && settings.cache_size < settings.block_size {
+            println!("Invalid options: the max cache size cannot be less than the block size.");
+            process::exit(-1);
+        }
 
-    if settings.verbose {
-        // FSLL debug messages aren't very interesting most of the time.
-        let filters = vec![("FSLL".to_string(), log::LogLevelFilter::Warn)];
-        log_output::init(log::LogLevelFilter::Debug, filters)
-    } else {
-        log_output::init(log::LogLevelFilter::Error, vec![])
-    }.unwrap();
+        if settings.cache.is_empty() {
+            println!("Invalid options: cache directory not specified. Use the '-o cache=<directory>' option.");
+            process::exit(-1);
+        }
+
+        if settings.foreground {
+            // have FUSE automatically unmount when the process exits.
+            settings.fuse_options.push(OsString::from("auto_unmount"));
+        } else {
+            settings.mount_point = match fs::canonicalize(settings.mount_point) {
+                Ok(pathbuf) => pathbuf.into_os_string(),
+                Err(e) => {
+                    println!("error canonicalizing mount point: {}", e);
+                    process::exit(1);
+                }
+            };
+            settings.backing_fs = match fs::canonicalize(settings.backing_fs) {
+                Ok(pathbuf) => pathbuf.into_os_string(),
+                Err(e) => {
+                    println!("error canonicalizing backing filesystem path: {}", e);
+                    process::exit(1);
+                }
+            };
+            settings.cache = match fs::canonicalize(settings.cache) {
+                Ok(pathbuf) => pathbuf.into_os_string(),
+                Err(e) => {
+                    println!("error canonicalizing cache path: {}", e);
+                    process::exit(1);
+                }
+            };
+        }
+
+        if settings.verbose {
+            // FSLL debug messages aren't very interesting most of the time.
+            let filters = vec![("FSLL".to_string(), log::LogLevelFilter::Warn)];
+            log_output::init(log::LogLevelFilter::Debug, filters)
+        } else {
+            log_output::init(log::LogLevelFilter::Error, vec![])
+        }.unwrap();
+    }
 
     let mut fuse_args: Vec<OsString> = vec![];
     if settings.fuse_options.len() > 0 {
