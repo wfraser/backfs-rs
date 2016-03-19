@@ -123,7 +123,7 @@ impl FSCache {
             if -1 == statvfs(path_c.into_raw(), &mut statbuf as *mut statvfs) {
                 Err(io::Error::last_os_error())
             } else {
-                Ok(statbuf.f_bsize * statbuf.f_blocks)
+                Ok(statbuf.f_bsize as u64 * statbuf.f_blocks as u64)
             }
         }
     }
