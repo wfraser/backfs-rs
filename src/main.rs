@@ -38,6 +38,7 @@ use osstrextras::OsStrExtras;
 extern crate daemonize;
 extern crate fuse;
 extern crate libc;
+extern crate syslog;
 extern crate time;
 extern crate walkdir;
 
@@ -107,10 +108,18 @@ fn main() {
         if settings.verbose {
             // FSLL debug messages aren't very interesting most of the time.
             let filters = vec![("FSLL".to_string(), log::LogLevelFilter::Warn)];
-            log_output::init(log::LogLevelFilter::Debug, filters)
+            log_output::init(log::LogLevelFilter::Debug, filters, !settings.foreground)
         } else {
-            log_output::init(log::LogLevelFilter::Error, vec![])
+            log_output::init(log::LogLevelFilter::Error, vec![], !settings.foreground)
         }.unwrap();
+
+
+        if !settings.foreground {
+            // If we're forking to the background, we need to make sure any panics get sent to
+            // syslog as well, or we'll never see them.
+            // Unfortunately, this is gated on rust nightly for now.
+            //log::log_panics();
+        }
     }
 
     let mut fuse_args: Vec<OsString> = vec![];

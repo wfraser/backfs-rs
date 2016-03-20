@@ -265,8 +265,9 @@ impl Filesystem for BackFS {
         if !self.settings.foreground {
             println!("BackFS: Going to background.");
             if let Err(e) = Daemonize::new().working_directory("/").start() {
-                println!("Error forking to background: {}", e);
-                panic!(e);
+                let msg = format!("Error forking to background: {}", e);
+                error!("{}", msg);
+                panic!(msg);
             }
         }
 
