@@ -110,7 +110,7 @@ fn main() {
             let filters = vec![("FSLL".to_string(), log::LogLevelFilter::Warn)];
             log_output::init(log::LogLevelFilter::Debug, filters, !settings.foreground)
         } else {
-            log_output::init(log::LogLevelFilter::Error, vec![], !settings.foreground)
+            log_output::init(log::LogLevelFilter::Warn, vec![], !settings.foreground)
         }.unwrap();
 
 
