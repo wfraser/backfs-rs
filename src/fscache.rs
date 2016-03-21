@@ -789,35 +789,43 @@ impl FSCache {
 
             let nread = block_data.len() as u64;
 
-            let block_offset = if block == first_block {
+            let block_start = if block == first_block {
                 // read starts part-way into this block
                 offset - block * self.block_size
             } else {
                 0
             };
 
-            let mut block_size = if block == last_block {
+            let mut block_end = if block == last_block {
                 // read ends part-way into this block
-                (offset + size) - (block * self.block_size)
+                (offset + size /* - result.len() as u64 */) - (block * self.block_size)
             } else {
                 self.block_size
             };
 
-            if block_size == 0 {
+            if block_end == 0 {
                 continue;
             }
 
-            if nread < block_size {
+            if nread < block_end {
                 // we read less than requested
-                block_size = nread;
+                block_end = nread;
             }
 
-            debug!("block_offset({:#x}) block_size({:#x}) nread({:#x})",
-                 block_offset, block_size, nread);
+            debug!("block_start({:#x}) block_end({:#x}) nread({:#x})",
+                 block_start, block_end, nread);
 
-            if block_offset != 0 || block_size != nread {
+            if block_start > block_end {
+                warn!("block_start({:#x}) > block_end({:#x}): on read {:#x} @ {:#x} (block {}, nread = {:#x})",
+                      block_start, block_end, size, offset, block, nread);
+                // Return an empty result. This is the expected behavior when a client seeks past
+                // the end of a file (not an error) and does a read.
+                return Ok(vec![]);
+            }
+
+            if block_start != 0 || block_end != nread {
                 // read a slice of the block
-                result.extend(&block_data[block_offset as usize .. block_size as usize]);
+                result.extend(&block_data[block_start as usize .. block_end as usize]);
             } else {
                 if block == first_block && block == last_block {
                     // Optimization for the common case where we read exactly 1 block.
