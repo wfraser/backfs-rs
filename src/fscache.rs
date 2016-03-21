@@ -711,12 +711,14 @@ impl FSCache {
         for entry_result in entries {
             match entry_result {
                 Ok(entry) => {
-                    if entry.file_type().unwrap().is_dir() {
-                        let entry_path = entry.path();
-                        if self.is_bucket_orphaned(&entry_path) {
-                            if let Err(e) = self.free_bucket(&entry_path) {
-                                error!("free_orphaned_buckets: error freeing {:?}: {}",
-                                     entry_path, e);
+                    if let Ok(filetype) = entry.file_type() {
+                        if filetype.is_dir() {
+                            let entry_path = entry.path();
+                            if self.is_bucket_orphaned(&entry_path) {
+                                if let Err(e) = self.free_bucket(&entry_path) {
+                                    error!("free_orphaned_buckets: error freeing {:?}: {}",
+                                         entry_path, e);
+                                }
                             }
                         }
                     }
