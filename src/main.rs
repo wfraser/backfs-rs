@@ -6,6 +6,8 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs;
+use std::io;
+use std::mem;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::process;
@@ -44,6 +46,19 @@ extern crate walkdir;
 
 #[macro_use]
 extern crate log;
+
+fn redirect_input_to_null() -> io::Result<()> {
+    unsafe {
+        let fd: libc::c_int = libc::open(mem::transmute(b"/dev/null\0"), libc::O_RDONLY);
+        if fd == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        if -1 == libc::dup2(fd, 0) {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
 
 fn main() {
     let args = env::args_os().collect::<Vec<OsString>>();
@@ -145,6 +160,10 @@ fn main() {
 
     let mountpoint = PathBuf::from(&settings.mount_point);
     let backfs = BackFS::new(settings);
+
+    if let Err(e) = redirect_input_to_null() {
+        panic!("Error redirecting stdin to /dev/null: {}", e);
+    }
 
     fuse::mount(backfs, &mountpoint, &fuse_args.as_deref()[..]);
 }
