@@ -306,7 +306,12 @@ impl Filesystem for BackFS {
                     reply.entry(&TTL, &attr, 0);
                 }
                 Err(e) => {
-                    error!("lookup: {:?}: {}", pathrc, e);
+                    let msg = format!("lookup: {:?}: {}", pathrc, e);
+                    if e.raw_os_error() == Some(ENOENT) {
+                        debug!("{}", msg);
+                    } else {
+                        error!("{}", msg);
+                    }
                     reply.error(e.raw_os_error().unwrap_or(EIO));
                 }
             }
