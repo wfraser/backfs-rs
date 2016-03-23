@@ -448,25 +448,26 @@ impl Filesystem for BackFS {
         if let Some(path) = self.inode_table.get_path(ino) {
             debug!("read: {:?} {:#x} @ {:#x}", path, size, offset);
 
-            match path.to_str() {
-                Some(BACKFS_CONTROL_FILE_PATH) => {
-                    let data = BACKFS_CONTROL_FILE_HELP.as_bytes();
-                    let end = cmp::min(data.len(), (size as usize - offset as usize));
+            let fake_data: Option<&[u8]> = match path.to_str() {
+                Some(BACKFS_CONTROL_FILE_PATH) => Some(BACKFS_CONTROL_FILE_HELP.as_bytes()),
+                Some(BACKFS_VERSION_FILE_PATH) => Some(BACKFS_VERSION.as_bytes()),
+                _ => None
+            };
+
+            if let Some(data) = fake_data {
+                if offset as usize >= data.len() {
+                    // Request out of range; return empty result.
+                    reply.data(&[0; 0]);
+                } else {
+                    let end = cmp::min(data.len(), (offset as usize + size as usize));
                     reply.data(&data[offset as usize .. end]);
-                    return;
-                },
-                Some(BACKFS_VERSION_FILE_PATH) => {
-                    let data: &[u8] = BACKFS_VERSION.as_bytes();
-                    let end = cmp::min(data.len(), (size as usize - offset as usize));
-                    reply.data(&data[offset as usize .. end]);
-                    return;
-                },
-                _ => ()
+                }
+                return;
             }
 
             let real_path = self.real_path(&path);
             let mut real_file = match File::open(Path::new(&real_path)) {
-                Ok(f) => { f },
+                Ok(f) => f,
                 Err(e) => {
                     reply.error(e.raw_os_error().unwrap());
                     return;
