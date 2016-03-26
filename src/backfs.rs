@@ -84,27 +84,6 @@ macro_rules! debug {
     ($($arg:tt)+) => (log2!(log::LogLevel::Debug, $($arg)+));
 }
 
-fn fuse_file_type(ft: &fs::FileType) -> FileType {
-    if ft.is_dir() {
-        FileType::Directory
-    } else if ft.is_file() {
-        FileType::RegularFile
-    } else if ft.is_symlink() {
-        FileType::Symlink
-    } else if ft.is_block_device() {
-        FileType::BlockDevice
-    } else if ft.is_char_device() {
-        FileType::CharDevice
-    } else if ft.is_fifo() {
-        FileType::NamedPipe
-    } else if ft.is_socket() {
-        warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
-        FileType::NamedPipe
-    } else {
-        panic!("unknown file type");
-    }
-}
-
 fn backfs_fake_file_attr(path: Option<&str>) -> Option<FileAttr> {
     match path {
         Some(BACKFS_CONTROL_FILE_PATH) => {
@@ -156,31 +135,52 @@ impl BackFS {
         let real: OsString = self.real_path(&path);
         debug!("stat_real: {:?}", real);
 
-        let metadata = try!(fs::metadata(Path::new(&real)));
+        match libc_wrappers::lstat(real) {
+            Ok(stat) => {
+                let inode = self.inode_table.add_or_get(path.clone());
 
-        let inode = self.inode_table.add_or_get(path.clone());
+                let kind = match stat.st_mode & libc::S_IFMT {
+                    libc::S_IFDIR => FileType::Directory,
+                    libc::S_IFREG => FileType::RegularFile,
+                    libc::S_IFLNK => FileType::Symlink,
+                    libc::S_IFBLK => FileType::BlockDevice,
+                    libc::S_IFCHR => FileType::CharDevice,
+                    libc::S_IFIFO  => FileType::NamedPipe,
+                    libc::S_IFSOCK => {
+                        warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
+                        FileType::NamedPipe
+                    },
+                    _ => { panic!("unknown file type"); }
+                };
 
-        let mut mode = metadata.mode() as u16;
-        if !self.settings.rw {
-            mode &= !0o222; // disable the write bit if we're not in RW mode.
+                let mut mode = stat.st_mode & 0o7777; // st_mode encodes the type AND the mode.
+                if !self.settings.rw {
+                    mode &= !0o222; // disable the write bits if we're not in RW mode.
+                }
+
+                Ok(FileAttr {
+                    ino: inode,
+                    size: stat.st_size as u64,
+                    blocks: stat.st_blocks as u64,
+                    atime: Timespec { sec: stat.st_atime, nsec: stat.st_atime_nsec as i32 },
+                    mtime: Timespec { sec: stat.st_mtime, nsec: stat.st_mtime_nsec as i32 },
+                    ctime: Timespec { sec: stat.st_ctime, nsec: stat.st_ctime_nsec as i32 },
+                    crtime: Timespec { sec: 0, nsec: 0 },
+                    kind: kind,
+                    perm: mode as u16,
+                    nlink: stat.st_nlink as u32,
+                    uid: stat.st_uid,
+                    gid: stat.st_gid,
+                    rdev: stat.st_rdev as u32,
+                    flags: 0,
+                })
+            },
+            Err(e) => {
+                let err = io::Error::from_raw_os_error(e);
+                error!("lstat({:?}): {}", path, err);
+                Err(err)
+            }
         }
-
-        Ok(FileAttr {
-            ino: inode,
-            size: metadata.len(),
-            blocks: metadata.blocks() as u64,
-            atime: Timespec { sec: metadata.atime(), nsec: metadata.atime_nsec() as i32 },
-            mtime: Timespec { sec: metadata.mtime(), nsec: metadata.mtime_nsec() as i32 },
-            ctime: Timespec { sec: metadata.ctime(), nsec: metadata.ctime_nsec() as i32 },
-            crtime: Timespec { sec: 0, nsec: 0 },
-            kind: fuse_file_type(&metadata.file_type()),
-            perm: mode,
-            nlink: metadata.nlink() as u32,
-            uid: metadata.uid(),
-            gid: metadata.gid(),
-            rdev: metadata.rdev() as u32,
-            flags: 0,
-        })
     }
 
     fn backfs_control_file_write(&mut self, data: &[u8], reply: ReplyWrite) {

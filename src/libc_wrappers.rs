@@ -80,3 +80,21 @@ pub fn close(fh: usize) -> Result<(), libc::c_int> {
         Ok(())
     }
 }
+
+pub fn lstat(path: OsString) -> Result<libc::stat, libc::c_int> {
+    let path_c = match CString::new(path.into_vec()) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("lstat: path {:?} contains interior NUL byte",
+                   OsString::from_vec(e.into_vec()));
+            return Err(libc::EINVAL);
+        }
+    };
+
+    let mut buf: libc::stat = unsafe { mem::zeroed() };
+    if -1 == unsafe { libc::lstat(mem::transmute(path_c.as_ptr()), &mut buf) } {
+        return Err(io::Error::last_os_error().raw_os_error().unwrap());
+    }
+
+    Ok(buf)
+}
