@@ -19,8 +19,8 @@ use inodetable::InodeTable;
 use fscache::FSCache;
 
 use daemonize::Daemonize;
-use fuse::{FileType, FileAttr, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyWrite, Request};
-use libc::*;
+use fuse::*;
+use libc;
 use log;
 use time::Timespec;
 
@@ -200,7 +200,7 @@ impl BackFS {
 
         match command {
             "test" => {
-                reply.error(EXDEV);
+                reply.error(libc::EXDEV);
                 return;
             },
             "noop" => (),
@@ -211,7 +211,7 @@ impl BackFS {
                 self.fscache.free_orphaned_buckets();
             },
             _ => {
-                reply.error(EBADMSG);
+                reply.error(libc::EBADMSG);
                 return;
             }
         }
@@ -252,7 +252,7 @@ impl BackFS {
 }
 
 impl Filesystem for BackFS {
-    fn init(&mut self, _req: &Request) -> Result<(), c_int> {
+    fn init(&mut self, _req: &Request) -> Result<(), libc::c_int> {
         debug!("init");
 
         if let Err(e) = self.internal_init() {
@@ -307,18 +307,18 @@ impl Filesystem for BackFS {
                 }
                 Err(e) => {
                     let msg = format!("lookup: {:?}: {}", pathrc, e);
-                    if e.raw_os_error() == Some(ENOENT) {
+                    if e.raw_os_error() == Some(libc::ENOENT) {
                         debug!("{}", msg);
                     } else {
                         error!("{}", msg);
                     }
-                    reply.error(e.raw_os_error().unwrap_or(EIO));
+                    reply.error(e.raw_os_error().unwrap_or(libc::EIO));
                 }
             }
 
         } else {
             error!("lookup: could not resolve parent inode {}", parent);
-            reply.error(ENOENT);
+            reply.error(libc::ENOENT);
         }
     }
 
@@ -342,12 +342,12 @@ impl Filesystem for BackFS {
                 },
                 Err(e) => {
                     error!("getattr: inode {}, path {:?}: {}", ino, pathrc, e);
-                    reply.error(e.raw_os_error().unwrap_or(EIO));
+                    reply.error(e.raw_os_error().unwrap_or(libc::EIO));
                 }
             }
         } else {
             error!("getattr: could not resolve inode {}", ino);
-            reply.error(ENOENT);
+            reply.error(libc::ENOENT);
         }
     }
 
@@ -375,7 +375,7 @@ impl Filesystem for BackFS {
                                 Some(inode) => inode,
                                 None => {
                                     error!("readdir: unable to get inode for parent of {:?}", path);
-                                    reply.error(EIO);
+                                    reply.error(libc::EIO);
                                     return;
                                 }
                             }
@@ -434,13 +434,13 @@ impl Filesystem for BackFS {
                 },
                 Err(e) => {
                     error!("readdir: {:?}: {}", path, e);
-                    reply.error(e.raw_os_error().unwrap_or(EIO));
+                    reply.error(e.raw_os_error().unwrap_or(libc::EIO));
                 }
             }
 
         } else {
             error!("readdir: could not resolve inode {}", ino);
-            reply.error(ENOENT);
+            reply.error(libc::ENOENT);
         }
     }
 
@@ -485,7 +485,7 @@ impl Filesystem for BackFS {
 
         } else {
             error!("read: could not resolve inode {}", ino);
-            reply.error(ENOENT);
+            reply.error(libc::ENOENT);
         }
     }
 
@@ -499,22 +499,22 @@ impl Filesystem for BackFS {
                     return;
                 },
                 Some(BACKFS_VERSION_FILE_PATH) => {
-                    reply.error(EACCES);
+                    reply.error(libc::EACCES);
                     return;
                 }
                 _ => ()
             }
 
             if !self.settings.rw {
-                reply.error(EROFS);
+                reply.error(libc::EROFS);
                 return;
             }
 
             // TODO
-            reply.error(ENOSYS);
+            reply.error(libc::ENOSYS);
         } else {
             error!("write: could not resolve inode {}", ino);
-            reply.error(ENOENT);
+            reply.error(libc::ENOENT);
         }
     }
 
