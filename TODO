@@ -1,9 +1,5 @@
 Remaining things to implement:
 - free buckets when device reports out of space
-- more syscalls:
-    - readlink
-    - opendir / releasedir (set the filehandle; use filehandle in readdir)
-    - open / release (ditto)
 - xattr support
     - special backfs xattrs
 - RW mode
