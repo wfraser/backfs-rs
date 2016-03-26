@@ -9,7 +9,7 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -162,9 +162,9 @@ impl BackFS {
                     ino: inode,
                     size: stat.st_size as u64,
                     blocks: stat.st_blocks as u64,
-                    atime: Timespec { sec: stat.st_atime, nsec: stat.st_atime_nsec as i32 },
-                    mtime: Timespec { sec: stat.st_mtime, nsec: stat.st_mtime_nsec as i32 },
-                    ctime: Timespec { sec: stat.st_ctime, nsec: stat.st_ctime_nsec as i32 },
+                    atime: Timespec { sec: stat.st_atime as i64, nsec: stat.st_atime_nsec as i32 },
+                    mtime: Timespec { sec: stat.st_mtime as i64, nsec: stat.st_mtime_nsec as i32 },
+                    ctime: Timespec { sec: stat.st_ctime as i64, nsec: stat.st_ctime_nsec as i32 },
                     crtime: Timespec { sec: 0, nsec: 0 },
                     kind: kind,
                     perm: mode as u16,

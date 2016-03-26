@@ -81,7 +81,7 @@ pub fn close(fh: usize) -> Result<(), libc::c_int> {
     }
 }
 
-pub fn lstat(path: OsString) -> Result<libc::stat, libc::c_int> {
+pub fn lstat(path: OsString) -> Result<libc::stat64, libc::c_int> {
     let path_c = match CString::new(path.into_vec()) {
         Ok(s) => s,
         Err(e) => {
@@ -91,8 +91,8 @@ pub fn lstat(path: OsString) -> Result<libc::stat, libc::c_int> {
         }
     };
 
-    let mut buf: libc::stat = unsafe { mem::zeroed() };
-    if -1 == unsafe { libc::lstat(mem::transmute(path_c.as_ptr()), &mut buf) } {
+    let mut buf: libc::stat64 = unsafe { mem::zeroed() };
+    if -1 == unsafe { libc::lstat64(mem::transmute(path_c.as_ptr()), &mut buf) } {
         return Err(io::Error::last_os_error().raw_os_error().unwrap());
     }
 
