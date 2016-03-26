@@ -14,9 +14,9 @@ pub fn opendir(path: OsString) -> Result<usize, libc::c_int> {
     let path_c = match CString::new(path.into_vec()) {
         Ok(s) => s,
         Err(e) => {
-            error!("path {:?} contains interior NUL byte",
+            error!("opendir: path {:?} contains interior NUL byte",
                    OsString::from_vec(e.into_vec()));
-            return Err(libc::EIO);
+            return Err(libc::EINVAL);
         }
     };
 
@@ -48,6 +48,33 @@ pub fn readdir(fh: usize) -> Result<Option<libc::dirent>, libc::c_int> {
 pub fn closedir(fh: usize) -> Result<(), libc::c_int> {
     let dir: *mut libc::DIR = unsafe { mem::transmute(fh) };
     if -1 == unsafe { libc::closedir(dir) } {
+        Err(io::Error::last_os_error().raw_os_error().unwrap())
+    } else {
+        Ok(())
+    }
+}
+
+pub fn open(path: OsString, flags: libc::c_int) -> Result<usize, libc::c_int> {
+    let path_c = match CString::new(path.into_vec()) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("open: path {:?} contains interior NUL byte",
+                   OsString::from_vec(e.into_vec()));
+            return Err(libc::EINVAL);
+        }
+    };
+
+    let fd: libc::c_int = unsafe { libc::open(mem::transmute(path_c.as_ptr()), flags) };
+    if fd == -1 {
+        return Err(io::Error::last_os_error().raw_os_error().unwrap());
+    }
+
+    Ok(fd as usize)
+}
+
+pub fn close(fh: usize) -> Result<(), libc::c_int> {
+    let fd = fh as libc::c_int;
+    if -1 == unsafe { libc::close(fd) } {
         Err(io::Error::last_os_error().raw_os_error().unwrap())
     } else {
         Ok(())

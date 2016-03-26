@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str;
@@ -480,7 +481,52 @@ impl Filesystem for BackFS {
         }
     }
 
-    fn read(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, size: u32, reply: ReplyData) {
+    fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
+        if let Some(path) = self.inode_table.get_path(ino) {
+            debug!("open: {:?} flags={:#x}", path, flags);
+
+            if match path.to_str() {
+                Some(BACKFS_CONTROL_FILE_PATH) => true,
+                Some(BACKFS_VERSION_FILE_PATH) => true,
+                _ => false
+            } {
+                reply.opened(0, flags);
+                return;
+            }
+
+            let real_path = self.real_path(&path);
+
+            match libc_wrappers::open(real_path, flags as libc::c_int) {
+                Ok(fh) => { reply.opened(fh as u64, flags); },
+                Err(e) => {
+                    error!("open({:?}): {}", path, io::Error::from_raw_os_error(e));
+                    reply.error(e);
+                }
+            }
+        } else {
+            error!("open: could not resolve inode {}", ino);
+            reply.error(libc::ENOENT);
+        }
+    }
+
+    fn release(&mut self, _req: &Request, ino: u64, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool, reply: ReplyEmpty) {
+        if let Some(path) = self.inode_table.get_path(ino) {
+            debug!("release: {:?}", path);
+
+            match libc_wrappers::close(fh as usize) {
+                Ok(()) => { reply.ok(); },
+                Err(e) => {
+                    error!("close({:?}): {}", path, io::Error::from_raw_os_error(e));
+                    reply.error(e);
+                }
+            }
+        } else {
+            error!("release: could not resolve inode {}", ino);
+            reply.error(libc::ENOENT);
+        }
+    }
+
+    fn read(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, size: u32, reply: ReplyData) {
         if let Some(path) = self.inode_table.get_path(ino) {
             debug!("read: {:?} {:#x} @ {:#x}", path, size, offset);
 
@@ -501,14 +547,7 @@ impl Filesystem for BackFS {
                 return;
             }
 
-            let real_path = self.real_path(&path);
-            let mut real_file = match File::open(Path::new(&real_path)) {
-                Ok(f) => f,
-                Err(e) => {
-                    reply.error(e.raw_os_error().unwrap());
-                    return;
-                }
-            };
+            let mut real_file = unsafe { File::from_raw_fd(fh as libc::c_int) };
 
             match self.fscache.fetch(&path, offset, size as u64, &mut real_file) {
                 Ok(data) => {
@@ -518,6 +557,10 @@ impl Filesystem for BackFS {
                     reply.error(e.raw_os_error().unwrap());
                 }
             }
+
+            // Release control of the file descriptor, so it is not closed when this function
+            // returns.
+            real_file.into_raw_fd();
 
         } else {
             error!("read: could not resolve inode {}", ino);
