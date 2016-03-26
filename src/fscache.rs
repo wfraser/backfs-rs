@@ -617,6 +617,9 @@ impl FSCache {
                         debug!("invalidate_path: invalidating {:?} - freeing {:?}",
                              entry_path, &bucket_path);
                         self.free_bucket(&bucket_path).unwrap();
+                    } else if entry.file_type().is_file() {
+                        // Remove mtime files.
+                        fs::remove_file(entry.path()).unwrap();
                     }
                 },
                 Err(e) => {
