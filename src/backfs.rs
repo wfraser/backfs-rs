@@ -8,7 +8,7 @@ use std::ffi::{CStr, OsStr, OsString};
 use std::fs;
 use std::fs::File;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};
@@ -593,6 +593,27 @@ impl Filesystem for BackFS {
             reply.error(libc::ENOSYS);
         } else {
             error!("write: could not resolve inode {}", ino);
+            reply.error(libc::ENOENT);
+        }
+    }
+
+    fn readlink(&mut self, _req: &Request, ino: u64, reply: ReplyData) {
+        if let Some(path) = self.inode_table.get_path(ino) {
+            debug!("readlink: {:?}", path);
+
+            let real_path = self.real_path(&path);
+
+            match fs::read_link(&real_path) {
+                Ok(path) => {
+                    reply.data(path.into_os_string().into_vec().as_ref());
+                },
+                Err(e) => {
+                    error!("readlink({:?}): {}", real_path, e);
+                    reply.error(e.raw_os_error().unwrap());
+                }
+            }
+        } else {
+            error!("readlink: could not resolve inode {}", ino);
             reply.error(libc::ENOENT);
         }
     }
