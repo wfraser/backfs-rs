@@ -360,7 +360,7 @@ impl Filesystem for BackFS {
             debug!("opendir: real = {:?}", real);
 
             match libc_wrappers::opendir(real) {
-                Ok(fh) => reply.opened(fh, 0),
+                Ok(fh) => reply.opened(fh as u64, 0),
                 Err(e) => reply.error(e)
             }
         } else {
@@ -409,7 +409,7 @@ impl Filesystem for BackFS {
             }
 
             loop {
-                match libc_wrappers::readdir(fh) {
+                match libc_wrappers::readdir(fh as usize) {
                     Ok(Some(entry)) => {
                         let name_c = unsafe { CStr::from_ptr(entry.d_name.as_ptr()) };
                         let name = OsStr::from_bytes(name_c.to_bytes());
@@ -467,7 +467,7 @@ impl Filesystem for BackFS {
     fn releasedir(&mut self, _req: &Request, ino: u64, fh: u64, _flags: u32, reply: ReplyEmpty) {
         if let Some(path) = self.inode_table.get_path(ino) {
             debug!("releasedir: {:?}", path);
-            match libc_wrappers::closedir(fh) {
+            match libc_wrappers::closedir(fh as usize) {
                 Ok(()) => { reply.ok(); }
                 Err(e) => {
                     error!("closedir({:?}): {}", path, io::Error::from_raw_os_error(e));

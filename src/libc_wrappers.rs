@@ -10,7 +10,7 @@ use std::ptr;
 use std::os::unix::ffi::OsStringExt;
 use libc;
 
-pub fn opendir(path: OsString) -> Result<u64, libc::c_int> {
+pub fn opendir(path: OsString) -> Result<usize, libc::c_int> {
     let path_c = match CString::new(path.into_vec()) {
         Ok(s) => s,
         Err(e) => {
@@ -25,10 +25,10 @@ pub fn opendir(path: OsString) -> Result<u64, libc::c_int> {
         return Err(io::Error::last_os_error().raw_os_error().unwrap());
     }
 
-    Ok(dir as u64)
+    Ok(dir as usize)
 }
 
-pub fn readdir(fh: u64) -> Result<Option<libc::dirent>, libc::c_int> {
+pub fn readdir(fh: usize) -> Result<Option<libc::dirent>, libc::c_int> {
     let dir: *mut libc::DIR = unsafe { mem::transmute(fh) };
     let mut entry: libc::dirent = unsafe { mem::zeroed() };
     let mut result: *mut libc::dirent = ptr::null_mut();
@@ -45,7 +45,7 @@ pub fn readdir(fh: u64) -> Result<Option<libc::dirent>, libc::c_int> {
     Ok(Some(entry))
 }
 
-pub fn closedir(fh: u64) -> Result<(), libc::c_int> {
+pub fn closedir(fh: usize) -> Result<(), libc::c_int> {
     let dir: *mut libc::DIR = unsafe { mem::transmute(fh) };
     if -1 == unsafe { libc::closedir(dir) } {
         Err(io::Error::last_os_error().raw_os_error().unwrap())
