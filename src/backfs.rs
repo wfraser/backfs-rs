@@ -4,7 +4,7 @@
 //
 
 use std::cmp;
-use std::ffi::{OsStr, OsString};
+use std::ffi::{CStr, OsStr, OsString};
 use std::fs;
 use std::fs::File;
 use std::io;
@@ -15,8 +15,9 @@ use std::rc::Rc;
 use std::str;
 
 use arg_parse::BackfsSettings;
-use inodetable::InodeTable;
 use fscache::FSCache;
+use inodetable::InodeTable;
+use libc_wrappers;
 
 use daemonize::Daemonize;
 use fuse::*;
@@ -351,95 +352,130 @@ impl Filesystem for BackFS {
         }
     }
 
-    fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, mut reply: ReplyDirectory) {
+    fn opendir(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
+        if let Some(path) = self.inode_table.get_path(ino) {
+            debug!("opendir: {:?}", path);
+
+            let real: OsString = self.real_path(&path);
+            debug!("opendir: real = {:?}", real);
+
+            match libc_wrappers::opendir(real) {
+                Ok(fh) => reply.opened(fh, 0),
+                Err(e) => reply.error(e)
+            }
+        } else {
+            error!("opendir: could not resolve inode {}", ino);
+            reply.error(libc::ENOENT);
+        }
+    }
+
+    fn readdir(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, mut reply: ReplyDirectory) {
         if let Some(path) = self.inode_table.get_path(ino) {
             debug!("readdir: {:?} @ {}", path, offset);
 
+            if fh == 0 {
+                error!("readdir: missing fh");
+                return;
+            }
+
             let is_root = ino == 1;
+            let mut index = 0u64;
 
-            let real = self.real_path(&path);
-            debug!("readdir: real = {:?}", real);
-
-            match fs::read_dir(real) {
-                Ok(entries) => {
-                    let mut index = 0u64;
-
-                    if offset == 0 {
-                        let parent_inode = if is_root {
-                            ino
-                        } else {
-                            let parent_path = Path::new(path.as_os_str()).parent().unwrap();
-                            let parent: OsString = parent_path.to_path_buf().into_os_string();
-                            debug!("readdir: parent of {:?} is {:?}", path, parent);
-                            match self.inode_table.get_inode(&parent) {
-                                Some(inode) => inode,
-                                None => {
-                                    error!("readdir: unable to get inode for parent of {:?}", path);
-                                    reply.error(libc::EIO);
-                                    return;
-                                }
-                            }
-                        };
-
-                        reply.add(ino, 0, FileType::Directory, ".");
-                        reply.add(parent_inode, 1, FileType::Directory, "..");
-                        index += 2;
-
-                        if is_root {
-                            reply.add(2, 2, FileType::RegularFile, BACKFS_CONTROL_FILE_NAME);
-                            reply.add(3, 3, FileType::RegularFile, BACKFS_VERSION_FILE_NAME);
-                            index += 2;
+            if offset == 0 {
+                let parent_inode = if is_root {
+                    ino
+                } else {
+                    let parent_path = Path::new(path.as_os_str()).parent().unwrap();
+                    let parent: OsString = parent_path.to_path_buf().into_os_string();
+                    match self.inode_table.get_inode(&parent) {
+                        Some(inode) => inode,
+                        None => {
+                            error!("readdir: unable to get inode for parent of {:?}", path);
+                            reply.error(libc::EIO);
+                            return;
                         }
                     }
+                };
 
-                    for entry_result in entries {
-                        match entry_result {
-                            Ok(entry) => {
-                                if index <= offset {
-                                    index += 1;
-                                    continue;
-                                }
+                reply.add(ino, 0, FileType::Directory, ".");
+                reply.add(parent_inode, 1, FileType::Directory, "..");
+                index += 2;
 
-                                let name: OsString = entry.file_name();
-
-                                // Combine the our path and entry.
-                                let pathrc = {
-                                    let mut entry_path = (*path).clone();
-                                    if entry_path.to_str() != Some("/") {
-                                        entry_path.push(OsStr::new("/"));
-                                    }
-                                    entry_path.push(name.as_os_str());
-                                    Rc::new(entry_path)
-                                };
-
-                                let inode = self.inode_table.add_or_get(pathrc);
-                                let filetype = fuse_file_type(&entry.file_type().unwrap());
-
-                                debug!("readdir: adding entry {}: {:?} of type {:?}", inode, name, filetype);
-                                let buffer_full: bool = reply.add(inode, index, filetype, name);
-
-                                if buffer_full {
-                                    debug!("readdir: reply buffer is full");
-                                    break;
-                                }
-
-                                index += 1;
-                            },
-                            Err(e) => {
-                                error!("readdir: {}", e);
-                            }
-                        }
-                    }
-                    reply.ok();
-                },
-                Err(e) => {
-                    error!("readdir: {:?}: {}", path, e);
-                    reply.error(e.raw_os_error().unwrap_or(libc::EIO));
+                if is_root {
+                    reply.add(2, 2, FileType::RegularFile, BACKFS_CONTROL_FILE_NAME);
+                    reply.add(3, 3, FileType::RegularFile, BACKFS_VERSION_FILE_NAME);
+                    index += 2;
                 }
             }
 
+            loop {
+                match libc_wrappers::readdir(fh) {
+                    Ok(Some(entry)) => {
+                        let name_c = unsafe { CStr::from_ptr(entry.d_name.as_ptr()) };
+                        let name = OsStr::from_bytes(name_c.to_bytes());
+
+                        let pathrc = {
+                            let mut entry_path = (*path).clone();
+                            if entry_path.to_str() != Some("/") {
+                                entry_path.push(OsStr::new("/"));
+                            }
+                            entry_path.push(name);
+                            Rc::new(entry_path)
+                        };
+
+                        let inode = self.inode_table.add_or_get(pathrc);
+                        let filetype = match entry.d_type {
+                            libc::DT_DIR => FileType::Directory,
+                            libc::DT_REG => FileType::RegularFile,
+                            libc::DT_LNK => FileType::Symlink,
+                            libc::DT_BLK => FileType::BlockDevice,
+                            libc::DT_CHR => FileType::CharDevice,
+                            libc::DT_FIFO => FileType::NamedPipe,
+                            libc::DT_SOCK => {
+                                warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
+                                FileType::NamedPipe
+                            },
+                            _ => { panic!("unknown file type"); }
+                        };
+
+                        debug!("readdir: adding entry {}: {:?} of type {:?}", inode, name, filetype);
+                        let buffer_full: bool = reply.add(inode, index, filetype, name);
+
+                        if buffer_full {
+                            debug!("readdir: reply buffer is full");
+                            break;
+                        }
+
+                        index += 1;
+                    },
+                    Ok(None) => { break; },
+                    Err(e) => {
+                        error!("readdir: {:?}: {}", path, e);
+                        reply.error(e);
+                        return;
+                    }
+                }
+            }
+
+            reply.ok();
         } else {
             error!("readdir: could not resolve inode {}", ino);
+            reply.error(libc::ENOENT);
+        }
+    }
+
+    fn releasedir(&mut self, _req: &Request, ino: u64, fh: u64, _flags: u32, reply: ReplyEmpty) {
+        if let Some(path) = self.inode_table.get_path(ino) {
+            debug!("releasedir: {:?}", path);
+            match libc_wrappers::closedir(fh) {
+                Ok(()) => { reply.ok(); }
+                Err(e) => {
+                    error!("closedir({:?}): {}", path, io::Error::from_raw_os_error(e));
+                    reply.error(e);
+                }
+            }
+        } else {
+            error!("releasedir: could not resolve inode {}", ino);
             reply.error(libc::ENOENT);
         }
     }

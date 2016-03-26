@@ -31,6 +31,7 @@ use backfs::BackFS;
 mod fscache;
 mod fsll;
 mod inodetable;
+mod libc_wrappers;
 mod link;
 mod log_output;
 

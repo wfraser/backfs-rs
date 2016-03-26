@@ -17,14 +17,14 @@ pub struct InodeTable {
     table: Vec<Rc<OsString>>
 }
 
-impl InodeTable {    
+impl InodeTable {
     pub fn new() -> InodeTable {
         InodeTable {
             map: BTreeMap::new(),
             table: Vec::new()
         }
     }
-    
+
     pub fn add(&mut self, path: OsString) -> Inode {
         let inode = (self.table.len() + 1) as Inode; // inodes will start at 1
         let rc = Rc::new(path);
@@ -49,14 +49,14 @@ impl InodeTable {
             }
         }
     }
-    
+
     pub fn get_path(&self, inode: Inode) -> Option<Rc<OsString>> {
         match self.table.get((inode - 1) as usize) {
             Some(rc) => Some(rc.clone()),
             None     => None
         }
     }
-    
+
     pub fn get_inode(&self, path: &OsString) -> Option<Inode> {
         match self.map.get(path) {
             Some(inode) => Some(*inode),
