@@ -537,10 +537,17 @@ impl FSCache {
 
         if need_to_free_bucket {
             // Something went wrong; we're not going to use this bucket.
+            // Remove the data file first, so that free_bucket doesn't try to count its size
+            // (we haven't counted it in used_bytes yet).
+            fs::remove_file(data_path).unwrap();
+
+            // Return this empty bucket to the free list.
             self.free_bucket(&bucket_path).unwrap();
         } else {
             self.used_bytes += data.len() as u64;
         }
+
+        debug!("used space now {} bytes", self.used_bytes);
 
         if let Some(e) = error {
             Err(e)
@@ -582,14 +589,17 @@ impl FSCache {
                 "error removing bucket parent link {:?}/parent", path);
 
         let data_path = PathBuf::from(path.as_ref()).join("data");
-        let data_size = {
-            let metadata = trylog!(fs::metadata(&data_path),
-                                   "error getting file metadata of {:?}", &data_path);
-            metadata.len()
+        let data_size = match fs::metadata(&data_path) {
+            Ok(metadata) => {
+                trylog!(fs::remove_file(&data_path),
+                        "error removing bucket data file {:?}", &data_path);
+                metadata.len()
+            },
+            Err(e) => {
+                debug!("error getting data file metadata of {:?}: {}", &data_path, e);
+                0
+            }
         };
-
-        trylog!(fs::remove_file(&data_path),
-                "error removing bucket data file {:?}/data", path);
 
         info!("freed {} bytes", data_size);
         self.used_bytes -= data_size;
