@@ -30,8 +30,13 @@ fn test_absolutepaths() {
     }
 
     test!("one/two", "/absolute/path" => "/absolute/path");
-    // TODO catch this panic: test!("/absolute/path", "one/two" => "/absolute/one/two");
     test!("/absolute/one", "/absolute/two/three" => "two/three");
+}
+
+#[test]
+#[should_panic]
+fn test_invalid_relative_to_absolute() {
+    make_path_relative_to("/absolute/path", "relative/path");
 }
 
 /// Takes two relative paths, which are assumed to both be relative to some unspecified common base
