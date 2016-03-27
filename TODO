@@ -1,5 +1,4 @@
 Remaining things to implement:
-- free buckets when device reports out of space
 - xattr support
     - special backfs xattrs
 - RW mode

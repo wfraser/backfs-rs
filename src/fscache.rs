@@ -450,7 +450,7 @@ impl FSCache {
         }
     }
 
-    fn write_block_to_cache(&mut self, path: &OsStr, block: u64, data: &[u8], mtime: i64) {
+    fn write_block_to_cache(&mut self, path: &OsStr, block: u64, data: &[u8], mtime: i64) -> io::Result<()> {
         let map_path = self.map_path(path);
 
         let cached_mtime: Option<i64> = self.cached_mtime(path);
@@ -461,13 +461,13 @@ impl FSCache {
             } else {
                 if let Err(e) = fs::create_dir_all(&map_path) {
                     error!("error creating map directory {:?}: {}", map_path, e);
-                    return;
+                    return Err(e);
                 }
             }
 
             if let Err(e) = self.write_mtime(path, mtime) {
                 error!("error writing mtime file; not writing data to cache: {}", e);
-                return;
+                return Err(e);
             }
         }
 
@@ -477,7 +477,7 @@ impl FSCache {
                 info!("need to free {} bytes", bytes_needed);
                 if let Err(e) = self.free_last_used_bucket() {
                     error!("error freeing up space: {}", e);
-                    return;
+                    return Err(e);
                 }
             } else {
                 break;
@@ -488,11 +488,12 @@ impl FSCache {
             Ok(path) => path,
             Err(e) => {
                 error!("error getting bucket: {}", e);
-                return;
+                return Err(e);
             }
         };
         let data_path = bucket_path.join("data");
 
+        let mut error: Option<io::Error> = None;
         let need_to_free_bucket = match OpenOptions::new()
                                                     .write(true)
                                                     .create(true)
@@ -508,24 +509,28 @@ impl FSCache {
                                     Ok(()) => false,
                                     Err(e) => {
                                         error!("error symlinking bucket to its parent: {}", e);
+                                        error = Some(e);
                                         true
                                     }
                                 }
                             }
                             Err(e) => {
                                 error!("error symlinking cache bucket into map: {}", e);
+                                error = Some(e);
                                 true
                             }
                         }
                     },
                     Err(e) => {
                         error!("error writing to cache data file: {}", e);
+                        error = Some(e);
                         true
                     }
                 }
             }
             Err(e) => {
                 error!("write_block_to_cache: error opening data file {:?}: {}", data_path, e);
+                error = Some(e);
                 true
             }
         };
@@ -535,6 +540,12 @@ impl FSCache {
             self.free_bucket(&bucket_path).unwrap();
         } else {
             self.used_bytes += data.len() as u64;
+        }
+
+        if let Some(e) = error {
+            Err(e)
+        } else {
+            Ok(())
         }
     }
 
@@ -784,7 +795,21 @@ impl FSCache {
                         buf.truncate(nread as usize);
                     }
 
-                    self.write_block_to_cache(path, block, &buf, mtime);
+                    while let Err(e) = self.write_block_to_cache(path, block, &buf, mtime) {
+                        if e.raw_os_error().unwrap() == ENOSPC {
+                            info!("writing to cache failed; freeing some space");
+                            match self.free_last_used_bucket() {
+                                Ok(_) => (),
+                                Err(e) => {
+                                    error!("error freeing space for cache data: {}", e);
+                                    return Err(e);
+                                }
+                            }
+                        } else {
+                            error!("unhandled error writing to cache: {}", e);
+                            break;
+                        }
+                    }
 
                     buf
                 }
