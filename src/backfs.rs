@@ -549,7 +549,16 @@ impl Filesystem for BackFS {
 
             let mut real_file = unsafe { File::from_raw_fd(fh as libc::c_int) };
 
-            match self.fscache.fetch(&path, offset, size as u64, &mut real_file) {
+            let mtime = match real_file.metadata() {
+                Ok(metadata) => metadata.mtime() as i64,
+                Err(e) => {
+                    error!("unable to get metadata from {:?}: {}", path, e);
+                    reply.error(e.raw_os_error().unwrap());
+                    return;
+                }
+            };
+
+            match self.fscache.fetch(&path, offset, size as u64, &mut real_file, mtime) {
                 Ok(data) => {
                     reply.data(&data);
                 },

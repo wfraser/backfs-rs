@@ -11,7 +11,6 @@ use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem;
-use std::os::unix::fs::MetadataExt;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -755,9 +754,9 @@ impl FSCache {
         }
     }
 
-    pub fn fetch(&mut self, path: &OsStr, offset: u64, size: u64, file: &mut fs::File) -> io::Result<Vec<u8>> {
-        let mtime = try!(file.metadata()).mtime() as i64;
-
+    pub fn fetch<F>(&mut self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
+            -> io::Result<Vec<u8>>
+            where F: Read + Seek {
         let cached_mtime = self.cached_mtime(path);
         if cached_mtime != Some(mtime) {
             if cached_mtime.is_some() {
