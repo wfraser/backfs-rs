@@ -18,7 +18,7 @@ use libc::*;
 use log;
 use walkdir::WalkDir;
 
-use fsll::FSLL;
+use fsll::{FSLL, PathLinkedList};
 use link;
 
 pub struct FSCache {

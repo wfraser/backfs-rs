@@ -49,6 +49,15 @@ pub struct FSLL {
     tail_link: OsString,
 }
 
+pub trait PathLinkedList {
+    fn is_empty(&self) -> bool;
+    fn get_tail(&self) -> Option<PathBuf>;
+    fn to_head<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()>;
+    fn insert_as_head<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()>;
+    fn insert_as_tail<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()>;
+    fn disconnect<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()>;
+}
+
 impl FSLL {
     pub fn new<T: AsRef<OsStr> + ?Sized,
                U: AsRef<OsStr> + ?Sized,
@@ -105,15 +114,6 @@ impl FSLL {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.getlink(&self.base_dir, &self.head_link).unwrap().is_none()
-            && self.getlink(&self.base_dir, &self.tail_link).unwrap().is_none()
-    }
-
-    pub fn get_tail(&self) -> Option<PathBuf> {
-        self.getlink(&self.base_dir, &self.tail_link).unwrap()
-    }
-
     fn get_head_tail(&self, method_name: &str) -> io::Result<(PathBuf, PathBuf)> {
         let head = match self.getlink(&self.base_dir, &self.head_link).unwrap() {
             Some(path) => path,
@@ -126,8 +126,19 @@ impl FSLL {
 
         Ok((head, tail))
     }
+}
 
-    pub fn to_head<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
+impl PathLinkedList for FSLL {
+    fn is_empty(&self) -> bool {
+        self.getlink(&self.base_dir, &self.head_link).unwrap().is_none()
+            && self.getlink(&self.base_dir, &self.tail_link).unwrap().is_none()
+    }
+
+    fn get_tail(&self) -> Option<PathBuf> {
+        self.getlink(&self.base_dir, &self.tail_link).unwrap()
+    }
+
+    fn to_head<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
         debug!("to_head: {:?}", path);
         let p: &Path = path.as_ref();
 
@@ -193,7 +204,7 @@ impl FSLL {
         Ok(())
     }
 
-    pub fn insert_as_head<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
+    fn insert_as_head<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
         debug!("insert_as_head: {:?}", path);
         let maybe_head = try!(self.getlink(&self.base_dir, &self.head_link));
         let maybe_tail = try!(self.getlink(&self.base_dir, &self.tail_link));
@@ -220,7 +231,7 @@ impl FSLL {
         Ok(())
     }
 
-    pub fn insert_as_tail<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
+    fn insert_as_tail<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
         let maybe_head = try!(self.getlink(&self.base_dir, &self.head_link));
         let maybe_tail = try!(self.getlink(&self.base_dir, &self.tail_link));
 
@@ -245,7 +256,7 @@ impl FSLL {
         Ok(())
     }
 
-    pub fn disconnect<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
+    fn disconnect<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
         let p: &Path = path.as_ref();
 
         let (head, tail) = try!(self.get_head_tail("disconnect"));
