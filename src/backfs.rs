@@ -16,10 +16,13 @@ use std::rc::Rc;
 use std::str;
 
 use arg_parse::BackfsSettings;
-use fscache::FSCache;
+use block_map::FSCacheBlockMap;
+use bucket_store::FSCacheBucketStore;
+use fscache::{FSCache, Cache};
 use fsll::FSLL;
 use inodetable::InodeTable;
 use libc_wrappers;
+use utils;
 
 use daemonize::Daemonize;
 use fuse::*;
@@ -61,7 +64,7 @@ const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
 pub struct BackFS {
     pub settings: BackfsSettings,
     inode_table: InodeTable,
-    fscache: FSCache<FSLL>,
+    fscache: FSCache<FSCacheBlockMap, FSCacheBucketStore<FSLL>>,
 }
 
 macro_rules! log2 {
@@ -119,12 +122,27 @@ fn human_number(n: u64) -> String {
 
 impl BackFS {
     pub fn new(settings: BackfsSettings) -> BackFS {
+        let max_bytes = if settings.cache_size == 0 {
+            None
+        } else {
+            Some(settings.cache_size)
+        };
+
+        let map_dir = PathBuf::from(&settings.cache).join("map").into_os_string();
+        debug!("map dir: {:?}", map_dir);
+        utils::create_dir_and_check_access(&map_dir).unwrap();
+        let map = FSCacheBlockMap::new(map_dir);
+
         let buckets_dir = PathBuf::from(&settings.cache).join("buckets").into_os_string();
+        debug!("buckets dir: {:?}", buckets_dir);
+        utils::create_dir_and_check_access(&buckets_dir).unwrap();
+        let used_list = FSLL::new(&buckets_dir, "head", "tail");
+        let free_list = FSLL::new(&buckets_dir, "free_head", "free_tail");
+        let store = FSCacheBucketStore::new(buckets_dir.clone(), used_list, free_list,
+                                            settings.block_size, max_bytes).unwrap();
+
         BackFS {
-            fscache: FSCache::new(&settings.cache, settings.block_size, settings.cache_size,
-                                  FSLL::new(&buckets_dir, "head", "tail"),
-                                  FSLL::new(&buckets_dir, "free_head", "free_tail"),
-                                  buckets_dir),
+            fscache: FSCache::new(map, store, settings.block_size),
             settings: settings,
             inode_table: InodeTable::new(),
         }
@@ -212,10 +230,10 @@ impl BackFS {
             },
             "noop" => (),
             "invalidate" => {
-                self.fscache.invalidate_path(arg);
+                let _ignore_errors = self.fscache.invalidate_path(arg);
             },
             "free_orphans" => {
-                self.fscache.free_orphaned_buckets();
+                let _ignore_errors = self.fscache.free_orphaned_buckets();
             },
             _ => {
                 reply.error(libc::EBADMSG);

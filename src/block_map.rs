@@ -3,26 +3,39 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
+use std::boxed::Box;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub enum CacheBlockMapResult {
-    Bucket(OsString),
-    NotPresent,
-    Stale,
+use link;
+use utils;
+
+pub enum CacheBlockMapFileEntryResult {
+    Entry(Box<CacheBlockMapFileEntry>),
+    StaleDataPresent,
+}
+
+pub trait CacheBlockMapFileEntry {
+    fn get(&self, block: u64) -> io::Result<Option<OsString>>;
+    fn put(&self, block: u64, bucket_path: &OsStr) -> io::Result<()>;
 }
 
 pub trait CacheBlockMap {
-    fn get(&self, path: &OsStr, block: u64, mtime: i64) -> io::Result<CacheBlockMapResult>;
-    fn put(&mut self, path: &OsStr, block: u64, mtime: i64, bucket_path: &OsStr) -> io::Result<()>;
+    fn get_file_entry(&mut self, path: &OsStr, mtime: i64)
+        -> io::Result<CacheBlockMapFileEntryResult>;
     fn invalidate<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
         where F: FnMut(&OsStr) -> io::Result<()>;
+    fn delete(&mut self, bucket_path: &OsStr) -> io::Result<()>;
 }
 
 pub struct FSCacheBlockMap {
     map_dir: OsString,
+}
+
+pub struct FSCacheBlockMapFileEntry {
+    file_map_dir: OsString,
 }
 
 impl FSCacheBlockMap {
@@ -53,13 +66,37 @@ impl FSCacheBlockMap {
 
 }
 
-impl CacheBlockMap  for FSCacheBlockMap {
-    fn get(&self, path: &OsStr, block: u64, mtime: i64) -> io::Result<CacheBlockMapResult> {
-        unimplemented!();
-    }
+impl CacheBlockMap for FSCacheBlockMap {
+    fn get_file_entry(&mut self, path: &OsStr, mtime: i64)
+            -> io::Result<CacheBlockMapFileEntryResult> {
+        let map_path = self.map_path(path);
+        debug!("get_file_entry: {:?}", map_path);
 
-    fn put(&mut self, path: &OsStr, block: u64, mtime: i64, bucket_path: &OsStr) -> io::Result<()> {
-        unimplemented!();
+        if let Err(e) = fs::create_dir_all(&map_path) {
+            error!("get_file_entry: error creating {:?}: {}", map_path, e);
+            return Err(e);
+        }
+
+        let mtime_path = map_path.join("mtime");
+        match utils::read_number_file(&mtime_path, None::<i64>) {
+            Ok(Some(n)) => {
+                if n != mtime {
+                    info!("cached data is stale: {:?}", path);
+                    return Ok(CacheBlockMapFileEntryResult::StaleDataPresent);
+                }
+            },
+            Ok(None) => {
+                try!(utils::write_number_file(&mtime_path, mtime));
+            },
+            Err(e) => {
+                error!("problem with mtime file {:?}: {}", &mtime_path, e);
+                return Err(e);
+            }
+        }
+
+        Ok(CacheBlockMapFileEntryResult::Entry(Box::new(FSCacheBlockMapFileEntry {
+            file_map_dir: map_path.into_os_string()
+        })))
     }
 
     fn invalidate<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
@@ -71,5 +108,24 @@ impl CacheBlockMap  for FSCacheBlockMap {
             return Err(e);
         }
         Ok(())
+    }
+
+    fn delete(&mut self, bucket_path: &OsStr) -> io::Result<()> {
+        // TODO: read the 'parent' link inside the now-freed bucket
+        // remove the parent link, and remove the map directory it points to.
+        unimplemented!();
+    }
+}
+
+impl CacheBlockMapFileEntry for FSCacheBlockMapFileEntry {
+    fn get(&self, block: u64) -> io::Result<Option<OsString>> {
+        match link::getlink(&self.file_map_dir, &format!("{}", block)) {
+            Ok(Some(pathbuf)) => Ok(Some(pathbuf.into_os_string())),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e)
+        }
+    }
+    fn put(&self, block: u64, bucket_path: &OsStr) -> io::Result<()> {
+        unimplemented!();
     }
 }
