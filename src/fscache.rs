@@ -18,14 +18,14 @@ use libc::*;
 use log;
 use walkdir::WalkDir;
 
-use fsll::{FSLL, PathLinkedList};
+use fsll::PathLinkedList;
 use link;
 
-pub struct FSCache {
+pub struct FSCache<LL: PathLinkedList> {
     buckets_dir: OsString,
     map_dir: OsString,
-    bucket_list: FSLL,
-    free_list: FSLL,
+    bucket_list: LL,
+    free_list: LL,
     block_size: u64,
     used_bytes: u64,
     max_bytes: u64,
@@ -74,12 +74,13 @@ macro_rules! trylog {
     }
 }
 
-impl FSCache {
-    pub fn new(cache: &OsString, block_size: u64, max_bytes: u64) -> FSCache {
-        let buckets_dir = PathBuf::from(cache).join("buckets").into_os_string();
+impl<LL: PathLinkedList> FSCache<LL> {
+    pub fn new(cache: &OsString, block_size: u64, max_bytes: u64,
+               bucket_list: LL, free_list: LL, buckets_dir: OsString)
+            -> FSCache<LL> {
         FSCache {
-            bucket_list: FSLL::new(&buckets_dir, "head", "tail"),
-            free_list: FSLL::new(&buckets_dir, "free_head", "free_tail"),
+            bucket_list: bucket_list,
+            free_list: free_list,
             buckets_dir: buckets_dir,
             map_dir: PathBuf::from(cache).join("map").into_os_string(),
             block_size: block_size,

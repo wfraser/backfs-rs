@@ -17,6 +17,7 @@ use std::str;
 
 use arg_parse::BackfsSettings;
 use fscache::FSCache;
+use fsll::FSLL;
 use inodetable::InodeTable;
 use libc_wrappers;
 
@@ -60,7 +61,7 @@ const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
 pub struct BackFS {
     pub settings: BackfsSettings,
     inode_table: InodeTable,
-    fscache: FSCache,
+    fscache: FSCache<FSLL>,
 }
 
 macro_rules! log2 {
@@ -118,8 +119,12 @@ fn human_number(n: u64) -> String {
 
 impl BackFS {
     pub fn new(settings: BackfsSettings) -> BackFS {
+        let buckets_dir = PathBuf::from(&settings.cache).join("buckets").into_os_string();
         BackFS {
-            fscache: FSCache::new(&settings.cache, settings.block_size, settings.cache_size),
+            fscache: FSCache::new(&settings.cache, settings.block_size, settings.cache_size,
+                                  FSLL::new(&buckets_dir, "head", "tail"),
+                                  FSLL::new(&buckets_dir, "free_head", "free_tail"),
+                                  buckets_dir),
             settings: settings,
             inode_table: InodeTable::new(),
         }
