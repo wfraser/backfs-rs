@@ -95,10 +95,8 @@ impl<M: CacheBlockMap, S: CacheBucketStore> FSCache<M, S> {
             }
         };
 
-        if let Err(e) = entry.put(block, &bucket_path) {
-            error!("error mapping cache bucket {:?} to {:?}/{}", bucket_path, path, block);
-            return Err(e);
-        }
+        trylog!(entry.put(block, &bucket_path),
+                "error mapping cache bucket {:?} to {:?}/{}", bucket_path, path, block);
         Ok(())
     }
 }
@@ -125,8 +123,8 @@ impl<M: CacheBlockMap, S: CacheBucketStore> Cache for FSCache<M, S> {
         let path: &Path = path.as_ref();
         debug!("invalidate_path: {:?}", path);
         let store = &mut self.store;
-        self.map.invalidate(path.as_os_str(), |bucket_path| {
-            match store.delete(&bucket_path) {
+        self.map.invalidate_path(path.as_os_str(), |bucket_path| {
+            match store.free_bucket(&bucket_path) {
                 Ok(n) => {
                     info!("freed {} bytes from bucket {:?}", n, bucket_path);
                     Ok(())
@@ -151,10 +149,8 @@ impl<M: CacheBlockMap, S: CacheBucketStore> Cache for FSCache<M, S> {
             Ok(CacheBlockMapFileEntryResult::Entry(entry)) => entry,
             Ok(CacheBlockMapFileEntryResult::StaleDataPresent) => {
                 info!("invalidating stale data for {:?}", path);
-                if let Err(e) = self.invalidate_path(path) {
-                    error!("unable to invalidate {:?}: {}", path, e);
-                    return Err(e);
-                }
+                trylog!(self.invalidate_path(path),
+                        "unable to invalidate {:?}", path);
                 if let Ok(CacheBlockMapFileEntryResult::Entry(entry)) = self.map.get_file_entry(path, mtime) {
                     entry
                 } else {
@@ -223,7 +219,7 @@ impl<M: CacheBlockMap, S: CacheBucketStore> Cache for FSCache<M, S> {
                             match self.store.delete_something() {
                                 Ok((bucket_path, n)) => {
                                     debug!("freed {} bytes from {:?}", n, bucket_path);
-                                    if let Err(e) = self.map.delete(&bucket_path) {
+                                    if let Err(e) = self.map.unmap_bucket(&bucket_path) {
                                         error!("error removing bucket {:?} from the map", bucket_path);
                                         return Err(e);
                                     }

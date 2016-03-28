@@ -17,7 +17,7 @@ use log;
 pub trait CacheBucketStore {
     fn get(&self, bucket_path: &OsStr) -> io::Result<Vec<u8>>;
     fn put(&mut self, data: &[u8]) -> io::Result<OsString>;
-    fn delete(&mut self, bucket_path: &OsStr) -> io::Result<u64>;
+    fn free_bucket(&mut self, bucket_path: &OsStr) -> io::Result<u64>;
     fn delete_something(&mut self) -> io::Result<(OsString, u64)>;
     fn used_bytes(&self) -> u64;
     fn max_bytes(&self) -> Option<u64>;
@@ -202,19 +202,13 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
 
     fn new_bucket(&mut self) -> io::Result<PathBuf> {
         let bucket_path = PathBuf::from(&self.buckets_dir).join(format!("{}", self.next_bucket_number));
-        if let Err(e) = fs::create_dir(&bucket_path) {
-            error!("error creating bucket directory {:?}: {}", bucket_path, e);
-            return Err(e);
-        }
+        trylog!(fs::create_dir(&bucket_path),
+                "error creating bucket directory {:?}", bucket_path);
         self.next_bucket_number += 1;
-        if let Err(e) = self.write_next_bucket_number(self.next_bucket_number) {
-            error!("error writing next bucket number: {}", e);
-            return Err(e);
-        }
-        if let Err(e) = self.used_list.insert_as_head(&bucket_path) {
-            error!("error setting bucket as head of used list: {}", e);
-            return Err(e);
-        }
+        trylog!(self.write_next_bucket_number(self.next_bucket_number),
+                "error writing next bucket number");
+        trylog!(self.used_list.insert_as_head(&bucket_path),
+                "error setting bucket as head of used list");
         Ok(bucket_path)
     }
 
@@ -229,19 +223,12 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
 
 impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
     fn get(&self, bucket_path: &OsStr) -> io::Result<Vec<u8>> {
-        if let Err(e) = self.used_list.to_head(bucket_path) {
-            error!("Error promoting bucket {:?} to head: {}", bucket_path, e);
-            return Err(e);
-        }
+        trylog!(self.used_list.to_head(bucket_path),
+                "Error promoting bucket {:?} to head", bucket_path);
 
         let data_path = PathBuf::from(bucket_path).join("data");
-        let mut block_file: File = match File::open(&data_path) {
-            Ok(file) => file,
-            Err(e) => {
-                warn!("cached_block error opening bucket data file {:?}: {}", data_path, e);
-                return Err(e);
-            }
-        };
+        let mut block_file: File = trylog!(File::open(&data_path),
+            "cached_block error opening bucket data file {:?}", data_path);;
 
         let mut data: Vec<u8> = Vec::with_capacity(self.bucket_size as usize);
         match block_file.read_to_end(&mut data) {
@@ -261,22 +248,15 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
             let bytes_needed = self.free_bytes_needed_for_write(data.len() as u64);
             if bytes_needed > 0 {
                 info!("need to free {} bytes", bytes_needed);
-                if let Err(e) = self.delete_something() {
-                    error!("error freeing up space: {}", e);
-                    return Err(e);
-                }
+                trylog!(self.delete_something(),
+                        "error freeing up space");
             } else {
                 break;
             }
         }
 
-        let bucket_path: PathBuf = match self.get_bucket() {
-            Ok(path) => path,
-            Err(e) => {
-                error!("error getting bucket: {}", e);
-                return Err(e);
-            }
-        };
+        let bucket_path: PathBuf = trylog!(self.get_bucket(),
+                                           "error getting bucket");
 
         let data_path = bucket_path.join("data");
 
@@ -311,7 +291,7 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
             fs::remove_file(data_path).unwrap();
 
             // Return this empty bucket to the free list.
-            self.delete(bucket_path.as_os_str()).unwrap();
+            self.free_bucket(bucket_path.as_os_str()).unwrap();
         } else {
             self.used_bytes += data.len() as u64;
         }
@@ -325,7 +305,7 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
         }
     }
 
-    fn delete(&mut self, bucket_path: &OsStr) -> io::Result<u64> {
+    fn free_bucket(&mut self, bucket_path: &OsStr) -> io::Result<u64> {
         unimplemented!();
     }
 

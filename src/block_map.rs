@@ -12,6 +12,50 @@ use std::path::{Path, PathBuf};
 use link;
 use utils;
 
+use log;
+
+macro_rules! log2 {
+    ($lvl:expr, $($arg:tt)+) => (
+        log!(target: "BlockMap", $lvl, $($arg)+));
+}
+
+macro_rules! error {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Error, $($arg)+));
+}
+
+macro_rules! warn {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Warn, $($arg)+));
+}
+
+macro_rules! info {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Info, $($arg)+));
+}
+
+macro_rules! debug {
+    ($($arg:tt)+) => (log2!(log::LogLevel::Debug, $($arg)+));
+}
+
+macro_rules! trylog {
+    ($e:expr, $fmt:expr) => {
+        match $e {
+            Ok(x) => x,
+            Err(e) => {
+                error!(concat!($fmt, ": {}\n"), e);
+                return Err(e);
+            }
+        }
+    };
+    ($e:expr, $fmt:expr, $($arg:tt)*) => {
+        match $e {
+            Ok(x) => x,
+            Err(e) => {
+                error!(concat!($fmt, ": {}\n"), $($arg)*, e);
+                return Err(e);
+            },
+        }
+    }
+}
+
 pub enum CacheBlockMapFileEntryResult {
     Entry(Box<CacheBlockMapFileEntry>),
     StaleDataPresent,
@@ -25,9 +69,9 @@ pub trait CacheBlockMapFileEntry {
 pub trait CacheBlockMap {
     fn get_file_entry(&mut self, path: &OsStr, mtime: i64)
         -> io::Result<CacheBlockMapFileEntryResult>;
-    fn invalidate<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
+    fn invalidate_path<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
         where F: FnMut(&OsStr) -> io::Result<()>;
-    fn delete(&mut self, bucket_path: &OsStr) -> io::Result<()>;
+    fn unmap_bucket(&mut self, bucket_path: &OsStr) -> io::Result<()>;
 }
 
 pub struct FSCacheBlockMap {
@@ -72,10 +116,8 @@ impl CacheBlockMap for FSCacheBlockMap {
         let map_path = self.map_path(path);
         debug!("get_file_entry: {:?}", map_path);
 
-        if let Err(e) = fs::create_dir_all(&map_path) {
-            error!("get_file_entry: error creating {:?}: {}", map_path, e);
-            return Err(e);
-        }
+        trylog!(fs::create_dir_all(&map_path),
+                "get_file_entry: error creating {:?}", map_path);
 
         let mtime_path = map_path.join("mtime");
         match utils::read_number_file(&mtime_path, None::<i64>) {
@@ -99,21 +141,38 @@ impl CacheBlockMap for FSCacheBlockMap {
         })))
     }
 
-    fn invalidate<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
+    fn invalidate_path<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
             where F: FnMut(&OsStr) -> io::Result<()> {
         let map_path: PathBuf = self.map_path(path);
         try!(self.enumerate_blocks_of_path(&map_path, f));
-        if let Err(e) = fs::remove_dir_all(&map_path) {
-            error!("Error removing map path {:?}: {}", map_path, e);
-            return Err(e);
-        }
+        trylog!(fs::remove_dir_all(&map_path),
+                "Error removing map path {:?}", map_path);
         Ok(())
     }
 
-    fn delete(&mut self, bucket_path: &OsStr) -> io::Result<()> {
-        // TODO: read the 'parent' link inside the now-freed bucket
-        // remove the parent link, and remove the map directory it points to.
-        unimplemented!();
+    fn unmap_bucket(&mut self, bucket_path: &OsStr) -> io::Result<()> {
+        let map_block_path = match link::getlink(bucket_path, "parent") {
+            Ok(Some(path)) => path,
+            Ok(None) => {
+                // We have no idea where this bucket is mapped...
+                warn!("trying to unmap a bucket that lacks a parent link: {:?}", bucket_path);
+                return Ok(());
+            }
+            Err(e) => {
+                error!("unable to read parent link from bucket {:?}: {}", bucket_path, e);
+                return Err(e);
+            }
+        };
+
+        trylog!(fs::remove_file(&map_block_path),
+                "unable to remove map block link {:?}", map_block_path);
+
+        trylog!(link::makelink(bucket_path, "parent", None::<&Path>),
+                "unable to remove parent link in {:?}", bucket_path);
+
+        // TODO: clean up parents
+
+        Ok(())
     }
 }
 
@@ -126,6 +185,8 @@ impl CacheBlockMapFileEntry for FSCacheBlockMapFileEntry {
         }
     }
     fn put(&self, block: u64, bucket_path: &OsStr) -> io::Result<()> {
-        unimplemented!();
+        trylog!(link::makelink(&self.file_map_dir, &format!("{}", block), Some(bucket_path)),
+                "error making map link from {:?}/{} to {:?}", &self.file_map_dir, block, bucket_path);
+        Ok(())
     }
 }
