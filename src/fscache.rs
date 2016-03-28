@@ -123,7 +123,7 @@ impl<M: CacheBlockMap, S: CacheBucketStore> Cache for FSCache<M, S> {
         let path: &Path = path.as_ref();
         debug!("invalidate_path: {:?}", path);
         let store = &mut self.store;
-        self.map.invalidate_path(path.as_os_str(), |bucket_path| {
+        self.map.invalidate_path(path.as_os_str(), |ref bucket_path| {
             match store.free_bucket(&bucket_path) {
                 Ok(n) => {
                     info!("freed {} bytes from bucket {:?}", n, bucket_path);

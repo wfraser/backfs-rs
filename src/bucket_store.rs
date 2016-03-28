@@ -306,7 +306,29 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
     }
 
     fn free_bucket(&mut self, bucket_path: &OsStr) -> io::Result<u64> {
-        unimplemented!();
+        debug!("freeing bucket {:?}", bucket_path);
+
+        trylog!(self.used_list.disconnect(bucket_path),
+                "error disconnecting bucket from used list {:?}", bucket_path);
+        trylog!(self.free_list.insert_as_tail(bucket_path),
+                "error inserting bucket into free list {:?}", bucket_path);
+
+        let data_path = PathBuf::from(bucket_path).join("data");
+        let data_size: u64 = match fs::metadata(&data_path) {
+            Ok(metadata) => {
+                trylog!(fs::remove_file(&data_path),
+                        "error removing bucket data file {:?}", &data_path);
+                metadata.len() as u64
+            },
+            Err(e) => {
+                debug!("error getting data file metadata of {:?}: {}", &data_path, e);
+                0
+            }
+        };
+
+        info!("freed {} bytes", data_size);
+        self.used_bytes -= data_size;
+        Ok(data_size)
     }
 
     fn delete_something(&mut self) -> io::Result<(OsString, u64)> {

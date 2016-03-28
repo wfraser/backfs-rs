@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use link;
 use utils;
 
+use libc;
 use log;
+use walkdir::WalkDir;
 
 macro_rules! log2 {
     ($lvl:expr, $($arg:tt)+) => (
@@ -103,9 +105,42 @@ impl FSCacheBlockMap {
         map_path
     }
 
-    fn enumerate_blocks_of_path<F>(&self, map_path: &Path, f: F) -> io::Result<()>
+    fn enumerate_blocks_of_path<F>(&self, map_path: &Path, mut f: F) -> io::Result<()>
             where F: FnMut(&OsStr) -> io::Result<()> {
-        unimplemented!();
+        for entry_result in WalkDir::new(map_path) {
+            match entry_result {
+                Ok(entry) => {
+                    let entry_path = entry.path();
+                    if entry.file_type().is_symlink() {
+                        let bucket_path = match link::getlink("", entry_path) {
+                            Ok(Some(path)) => path,
+                            Err(e) => {
+                                error!("enumerate_blocks_of_path: error reading link {:?}: {}",
+                                     entry.path(), e);
+                                continue;
+                            },
+                            Ok(None) => unreachable!()
+                        };
+
+                        trylog!(f(bucket_path.as_os_str()),
+                                "enumerate_blocks_of_path: callback returned error");
+                    }
+                },
+                Err(e) => {
+                    let is_start = e.path() == Some(map_path);
+                    let ioerr = io::Error::from(e);
+                    if is_start && ioerr.raw_os_error() == Some(libc::ENOENT) {
+                        // If the map directory doesn't exist, there's nothing to do.
+                        return Ok(())
+                    } else {
+                        error!("enumerate_blocks_of_path: error reading directory entry from {:?}: {}",
+                               map_path, ioerr);
+                        return Err(ioerr)
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
 }
