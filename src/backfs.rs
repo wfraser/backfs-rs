@@ -120,6 +120,22 @@ fn human_number(n: u64) -> String {
     }
 }
 
+fn mode_to_filetype(mode: libc::mode_t) -> FileType {
+    match mode & libc::S_IFMT {
+        libc::S_IFDIR => FileType::Directory,
+        libc::S_IFREG => FileType::RegularFile,
+        libc::S_IFLNK => FileType::Symlink,
+        libc::S_IFBLK => FileType::BlockDevice,
+        libc::S_IFCHR => FileType::CharDevice,
+        libc::S_IFIFO  => FileType::NamedPipe,
+        libc::S_IFSOCK => {
+            warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
+            FileType::NamedPipe
+        },
+        _ => { panic!("unknown file type"); }
+    }
+}
+
 impl BackFS {
     pub fn new(settings: BackfsSettings) -> BackFS {
         let max_bytes = if settings.cache_size == 0 {
@@ -154,6 +170,7 @@ impl BackFS {
                 .into_os_string()
     }
 
+
     fn stat_real(&mut self, path: &Rc<OsString>) -> io::Result<FileAttr> {
         let real: OsString = self.real_path(&path);
         debug!("stat_real: {:?}", real);
@@ -162,19 +179,7 @@ impl BackFS {
             Ok(stat) => {
                 let inode = self.inode_table.add_or_get(path.clone());
 
-                let kind = match stat.st_mode & libc::S_IFMT {
-                    libc::S_IFDIR => FileType::Directory,
-                    libc::S_IFREG => FileType::RegularFile,
-                    libc::S_IFLNK => FileType::Symlink,
-                    libc::S_IFBLK => FileType::BlockDevice,
-                    libc::S_IFCHR => FileType::CharDevice,
-                    libc::S_IFIFO  => FileType::NamedPipe,
-                    libc::S_IFSOCK => {
-                        warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
-                        FileType::NamedPipe
-                    },
-                    _ => { panic!("unknown file type"); }
-                };
+                let kind = mode_to_filetype(stat.st_mode);
 
                 let mut mode = stat.st_mode & 0o7777; // st_mode encodes the type AND the mode.
                 if !self.settings.rw {
@@ -447,7 +452,7 @@ impl Filesystem for BackFS {
                             Rc::new(entry_path)
                         };
 
-                        let inode = self.inode_table.add_or_get(pathrc);
+                        let inode = self.inode_table.add_or_get(pathrc.clone());
                         let filetype = match entry.d_type {
                             libc::DT_DIR => FileType::Directory,
                             libc::DT_REG => FileType::RegularFile,
@@ -459,7 +464,18 @@ impl Filesystem for BackFS {
                                 warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
                                 FileType::NamedPipe
                             },
-                            _ => { panic!("unknown file type"); }
+                            0 | _ => {
+                                let real_path = self.real_path(&*pathrc);
+                                match libc_wrappers::lstat(real_path) {
+                                    Ok(stat64) => mode_to_filetype(stat64.st_mode),
+                                    Err(errno) => {
+                                        let ioerr = io::Error::from_raw_os_error(errno);
+                                        panic!("lstat failed after readdir_r gave no file type for {:?}: {}",
+                                               pathrc, ioerr);
+                                    }
+                                }
+
+                            }
                         };
 
                         debug!("readdir: adding entry {}: {:?} of type {:?}", inode, name, filetype);
