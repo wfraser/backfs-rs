@@ -104,8 +104,8 @@ impl<M: CacheBlockMap, S: CacheBucketStore> FSCache<M, S> {
 
 impl<M: CacheBlockMap, S: CacheBucketStore> Cache for FSCache<M, S> {
     fn init(&mut self) -> io::Result<()> {
-        //TODO
-        Ok(())
+        let map = &mut self.map;
+        self.store.init(|freed_bucket| map.unmap_bucket(freed_bucket))
     }
 
     fn used_size(&self) -> u64 {

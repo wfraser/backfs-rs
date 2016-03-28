@@ -15,6 +15,8 @@ use libc;
 use log;
 
 pub trait CacheBucketStore {
+    fn init<F>(&mut self, mut delete_handler: F) -> io::Result<()>
+        where F: FnMut(&OsStr) -> io::Result<()>;
     fn get(&self, bucket_path: &OsStr) -> io::Result<Vec<u8>>;
     fn put<F>(&mut self, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
         where F: FnMut(&OsStr) -> io::Result<()>;
@@ -78,8 +80,8 @@ macro_rules! trylog {
 
 impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
     pub fn new(buckets_dir: OsString, used_list: LL, free_list: LL, block_size: u64, max_bytes: Option<u64>)
-            -> io::Result<FSCacheBucketStore<LL>> {
-        let mut store = FSCacheBucketStore {
+            -> FSCacheBucketStore<LL> {
+        FSCacheBucketStore {
             buckets_dir: buckets_dir,
             used_list: used_list,
             free_list: free_list,
@@ -87,45 +89,7 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
             max_bytes: max_bytes,
             bucket_size: block_size,
             next_bucket_number: 0,
-        };
-        try!(store.init());
-        Ok(store)
-    }
-
-    fn init(&mut self) -> io::Result<()> {
-        self.next_bucket_number = try!(self.read_next_bucket_number());
-        info!("next bucket number: {}", self.next_bucket_number);
-
-        match utils::read_number_file(&PathBuf::from(&self.buckets_dir).join("bucket_size"),
-                                      Some(self.bucket_size)) {
-            Ok(Some(size)) => {
-                if size != self.bucket_size {
-                    let msg = format!(
-                        "block size in cache ({}) doesn't match the size in the options ({})",
-                        size,
-                        self.bucket_size);
-                    error!("{}", msg);
-                    return Err(io::Error::new(io::ErrorKind::Other, msg));
-                }
-            },
-            Err(e) => {
-                let msg = format!("error reading bucket_size file: {}", e);
-                error!("{}", msg);
-                return Err(io::Error::new(io::ErrorKind::Other, msg));
-            },
-            Ok(None) => unreachable!()
         }
-
-        self.used_bytes = try!(self.compute_cache_used_size());
-
-        if self.max_bytes.is_some() && self.used_bytes > self.max_bytes.unwrap() {
-            warn!("cache is over-size; freeing buckets until it is within limits");
-            while self.used_bytes > self.max_bytes.unwrap() {
-                try!(self.delete_something());
-            }
-        }
-
-        Ok(())
     }
 
     fn read_next_bucket_number(&self) -> io::Result<u64> {
@@ -223,6 +187,45 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
 }
 
 impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
+    fn init<F>(&mut self, mut delete_handler: F) -> io::Result<()>
+            where F: FnMut(&OsStr) -> io::Result<()> {
+        self.next_bucket_number = try!(self.read_next_bucket_number());
+        info!("next bucket number: {}", self.next_bucket_number);
+
+        match utils::read_number_file(&PathBuf::from(&self.buckets_dir).join("bucket_size"),
+                                      Some(self.bucket_size)) {
+            Ok(Some(size)) => {
+                if size != self.bucket_size {
+                    let msg = format!(
+                        "block size in cache ({}) doesn't match the size in the options ({})",
+                        size,
+                        self.bucket_size);
+                    error!("{}", msg);
+                    return Err(io::Error::new(io::ErrorKind::Other, msg));
+                }
+            },
+            Err(e) => {
+                let msg = format!("error reading bucket_size file: {}", e);
+                error!("{}", msg);
+                return Err(io::Error::new(io::ErrorKind::Other, msg));
+            },
+            Ok(None) => unreachable!()
+        }
+
+        self.used_bytes = try!(self.compute_cache_used_size());
+
+        if self.max_bytes.is_some() && self.used_bytes > self.max_bytes.unwrap() {
+            warn!("cache is over-size; freeing buckets until it is within limits");
+            while self.used_bytes > self.max_bytes.unwrap() {
+                let (freed_bucket, _) = try!(self.delete_something());
+                trylog!(delete_handler(&freed_bucket),
+                        "delete handler returned error");
+            }
+        }
+
+        Ok(())
+    }
+
     fn get(&self, bucket_path: &OsStr) -> io::Result<Vec<u8>> {
         trylog!(self.used_list.to_head(bucket_path),
                 "Error promoting bucket {:?} to head", bucket_path);

@@ -139,7 +139,7 @@ impl BackFS {
         let used_list = FSLL::new(&buckets_dir, "head", "tail");
         let free_list = FSLL::new(&buckets_dir, "free_head", "free_tail");
         let store = FSCacheBucketStore::new(buckets_dir.clone(), used_list, free_list,
-                                            settings.block_size, max_bytes).unwrap();
+                                            settings.block_size, max_bytes);
 
         BackFS {
             fscache: FSCache::new(map, store, settings.block_size),
