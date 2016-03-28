@@ -28,12 +28,16 @@ use arg_parse::BackfsSettings;
 mod backfs;
 use backfs::BackFS;
 
+mod bucket_store;
+mod block_map;
+
 mod fscache;
 mod fsll;
 mod inodetable;
 mod libc_wrappers;
 mod link;
 mod log_output;
+mod utils;
 
 mod osstrextras;
 use osstrextras::OsStrExtras;

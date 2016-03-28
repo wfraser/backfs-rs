@@ -20,6 +20,7 @@ use walkdir::WalkDir;
 
 use fsll::PathLinkedList;
 use link;
+use utils;
 
 pub struct FSCache<LL: PathLinkedList> {
     buckets_dir: OsString,
@@ -135,7 +136,7 @@ impl<LL: PathLinkedList> FSCache<LL> {
         self.next_bucket_number = try!(self.read_next_bucket_number());
         info!("next bucket number: {}", self.next_bucket_number);
 
-        match self.read_number_file(&PathBuf::from(&self.buckets_dir).join("bucket_size"), Some(self.block_size)) {
+        match utils::read_number_file(&PathBuf::from(&self.buckets_dir).join("bucket_size"), Some(self.block_size)) {
             Ok(Some(size)) => {
                 if size != self.block_size {
                     let msg = format!(
@@ -288,123 +289,10 @@ impl<LL: PathLinkedList> FSCache<LL> {
         }
     }
 
-    fn open_or_create_file<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<(File, bool)> {
-        match OpenOptions::new()
-                          .read(true)
-                          .write(true)
-                          .open(path) {
-            Ok(file) => Ok((file, false)),
-            Err(e) => {
-                if e.raw_os_error() == Some(ENOENT) {
-                    match OpenOptions::new()
-                                      .read(true)
-                                      .write(true)
-                                      .create(true)
-                                      .open(path) {
-                        Ok(file) => Ok((file, true)),
-                        Err(e) => {
-                            error!("error creating file {:?}: {}", path, e);
-                            Err(e)
-                        }
-                    }
-                } else {
-                    error!("error opening file {:?}: {}", path, e);
-                    Err(e)
-                }
-            }
-        }
-    }
-
-    fn read_number_file<N: Display + FromStr,
-                        T: AsRef<Path> + ?Sized + Debug>(
-                            &self,
-                            path: &T,
-                            default: Option<N>
-                        ) -> io::Result<Option<N>>
-                        where <N as FromStr>::Err: Debug {
-        let (mut file, new) = if default.is_none() {
-            // If no default value was given, don't create a file, just open the existing one if
-            // there is one, or return None.
-            let file = match File::open(path) {
-                Ok(file) => file,
-                Err(e) => {
-                    if e.raw_os_error() == Some(ENOENT) {
-                        return Ok(None);
-                    } else {
-                        return Err(e);
-                    }
-                }
-            };
-            (file, false)
-        } else {
-            try!(self.open_or_create_file(path))
-        };
-
-        if new {
-            match default {
-                Some(n) => match write!(file, "{}", n) {
-                    Ok(_) => Ok(Some(n)),
-                    Err(e) => {
-                        error!("error writing to {:?}: {}", path, e);
-                        Err(e)
-                    }
-                },
-                None => Ok(None)
-            }
-        } else {
-            let mut data: Vec<u8> = vec![];
-            trylog!(file.read_to_end(&mut data),
-                    "error reading from {:?}", path);
-
-            let string = match String::from_utf8(data) {
-                Ok(s) => s,
-                Err(e) => {
-                    let msg = format!("error interpreting file {:?} as UTF8 string: {}", path, e);
-                    error!("{}", msg);
-                    return Err(io::Error::new(io::ErrorKind::Other, msg));
-                }
-            };
-
-            let number: N = match string.trim().parse() {
-                Ok(n) => n,
-                Err(e) => {
-                    let msg = format!("error interpreting file {:?} as number: {:?}", path, e);
-                    error!("{}", msg);
-                    return Err(io::Error::new(io::ErrorKind::Other, msg));
-                }
-            };
-
-            Ok(Some(number))
-        }
-    }
-
-    fn write_number_file<N: Display + FromStr,
-                         T: AsRef<Path> + ?Sized + Debug>(
-                             &self,
-                             path: &T,
-                             number: N
-                        ) -> io::Result<()> {
-        match OpenOptions::new()
-                          .write(true)
-                          .truncate(true)
-                          .create(true)
-                          .open(&path) {
-            Ok(mut file) => {
-                trylog!(write!(file, "{}", number),
-                        "error writing to {:?}", path);
-            },
-            Err(e) => {
-                error!("error opening {:?}: {}", path, e);
-                return Err(e);
-            }
-        }
-        Ok(())
-    }
-
     fn cached_mtime(&self, path: &OsStr) -> Option<i64> {
         let mtime_path: PathBuf = self.map_path(path).join("mtime");
 
-        self.read_number_file(&mtime_path, None::<i64>).unwrap_or_else(|e| {
+        utils::read_number_file(&mtime_path, None::<i64>).unwrap_or_else(|e| {
             error!("problem with mtime file {:?}: {}", &mtime_path, e);
             None
         })
@@ -412,17 +300,17 @@ impl<LL: PathLinkedList> FSCache<LL> {
 
     fn write_next_bucket_number(&self, bucket_number: u64) -> io::Result<()> {
         let path = PathBuf::from(&self.buckets_dir).join("next_bucket_number");
-        self.write_number_file(&path, bucket_number)
+        utils::write_number_file(&path, bucket_number)
     }
 
     fn read_next_bucket_number(&self) -> io::Result<u64> {
         let path = PathBuf::from(&self.buckets_dir).join("next_bucket_number");
-        self.read_number_file(&path, Some(0u64)).and_then(|r| Ok(r.unwrap()))
+        utils::read_number_file(&path, Some(0u64)).and_then(|r| Ok(r.unwrap()))
     }
 
     fn write_mtime(&self, path: &OsStr, mtime: i64) -> io::Result<()> {
         let path: PathBuf = self.map_path(path).join("mtime");
-        self.write_number_file(&path, mtime)
+        utils::write_number_file(&path, mtime)
     }
 
     fn new_bucket(&mut self) -> io::Result<PathBuf> {
