@@ -85,7 +85,8 @@ impl<M: CacheBlockMap, S: CacheBucketStore> FSCache<M, S> {
     fn write_block_to_cache(&mut self, path: &OsStr, block: u64, data: &[u8],
                             entry: &mut CacheBlockMapFileEntry)
                             -> io::Result<()> {
-        let bucket_path = match self.store.put(data) {
+        let map = &mut self.map;
+        let bucket_path = match self.store.put(data, |freed_bucket| map.unmap_bucket(freed_bucket)) {
             Ok(path) => path,
             Err(e) => {
                 if e.raw_os_error() != Some(libc::ENOSPC) {

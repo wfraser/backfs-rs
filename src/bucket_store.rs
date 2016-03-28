@@ -16,7 +16,8 @@ use log;
 
 pub trait CacheBucketStore {
     fn get(&self, bucket_path: &OsStr) -> io::Result<Vec<u8>>;
-    fn put(&mut self, data: &[u8]) -> io::Result<OsString>;
+    fn put<F>(&mut self, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
+        where F: FnMut(&OsStr) -> io::Result<()>;
     fn free_bucket(&mut self, bucket_path: &OsStr) -> io::Result<u64>;
     fn delete_something(&mut self) -> io::Result<(OsString, u64)>;
     fn used_bytes(&self) -> u64;
@@ -243,13 +244,16 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
         }
     }
 
-    fn put(&mut self, data: &[u8]) -> io::Result<OsString> {
+    fn put<F>(&mut self, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
+            where F: FnMut(&OsStr) -> io::Result<()> {
         loop {
             let bytes_needed = self.free_bytes_needed_for_write(data.len() as u64);
             if bytes_needed > 0 {
                 info!("need to free {} bytes", bytes_needed);
-                trylog!(self.delete_something(),
-                        "error freeing up space");
+                let (bucket_path, _) = trylog!(self.delete_something(),
+                                               "error freeing up space");
+                trylog!(delete_handler(&bucket_path),
+                        "delete handler returned error");
             } else {
                 break;
             }
@@ -332,8 +336,16 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
     }
 
     fn delete_something(&mut self) -> io::Result<(OsString, u64)> {
-        // TODO: this needs a way to tell FSCacheBlockMap to remove its mapping
-        unimplemented!();
+        let bucket_path: PathBuf = match self.used_list.get_tail() {
+            Some(path) => path,
+            None => {
+                error!("can't free anything; the used list is empty!");
+                return Err(io::Error::from_raw_os_error(libc::EINVAL));
+            },
+        };
+        let bytes_freed = trylog!(self.free_bucket(bucket_path.as_os_str()),
+                                  "error freeing bucket {:?}", bucket_path);
+        Ok((bucket_path.into_os_string(), bytes_freed))
     }
 
     fn used_bytes(&self) -> u64 {
