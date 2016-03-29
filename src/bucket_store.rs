@@ -14,6 +14,10 @@ use utils;
 use libc;
 use log;
 
+// TODO:
+// CacheBucketStore::put should require the parent (aka map) path as an argument.
+// CacheBucketStore::delete_something should return the parent path instead of the bucket path.
+
 pub trait CacheBucketStore {
     fn init<F>(&mut self, mut delete_handler: F) -> io::Result<()>
         where F: FnMut(&OsStr) -> io::Result<()>;
@@ -252,64 +256,50 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
         loop {
             let bytes_needed = self.free_bytes_needed_for_write(data.len() as u64);
             if bytes_needed > 0 {
-                info!("need to free {} bytes", bytes_needed);
+                info!("put: need to free {} bytes", bytes_needed);
                 let (bucket_path, _) = trylog!(self.delete_something(),
-                                               "error freeing up space");
+                                               "put: error freeing up space");
                 trylog!(delete_handler(&bucket_path),
-                        "delete handler returned error");
+                        "put: delete handler returned error");
             } else {
                 break;
             }
         }
 
         let bucket_path: PathBuf = trylog!(self.get_bucket(),
-                                           "error getting bucket");
+                                           "put: error getting bucket");
 
         let data_path = bucket_path.join("data");
 
-        let mut error: Option<io::Error> = None;
-        let need_to_free_bucket = match OpenOptions::new()
-                                                    .write(true)
-                                                    .create(true)
-                                                    .open(&data_path) {
-            Ok(mut file) => {
-                match file.write_all(data) {
-                    Ok(()) => {
-                        false
-                    },
-                    Err(e) => {
-                        error!("error writing to cache data file: {}", e);
-                        error = Some(e);
-                        true
+        let mut data_file = trylog!(OpenOptions::new()
+                                                .write(true)
+                                                .create(true)
+                                                .open(&data_path),
+                                    "put: error opening data file {:?}", data_path);
+
+        loop {
+            match data_file.write_all(data) {
+                Ok(()) => { break; },
+                Err(e) => {
+                    if e.raw_os_error() == Some(libc::ENOSPC) {
+                        info!("put: out of space; freeing buckets");
+                        let (freed_bucket, n) = trylog!(self.delete_something(),
+                                                        "put: error freeing up space");
+                        trylog!(delete_handler(&freed_bucket),
+                                "put: delete handler returned error");
+                        info!("freed {} bytes; trying the write again", n);
+                    } else {
+                        error!("put: error writing to cache data file {:?}: {}", data_path, e);
+                        return Err(e);
                     }
                 }
-            },
-            Err(e) => {
-                error!("put: error opening data file {:?}: {}", data_path, e);
-                error = Some(e);
-                true
             }
-        };
-
-        if need_to_free_bucket {
-            // Something went wrong; we're not going to use this bucket.
-            // Remove the data file first, so that `delete` doesn't try to count its size
-            // (we haven't counted it in `used_bytes` yet).
-            fs::remove_file(data_path).unwrap();
-
-            // Return this empty bucket to the free list.
-            self.free_bucket(bucket_path.as_os_str()).unwrap();
-        } else {
-            self.used_bytes += data.len() as u64;
         }
 
+        self.used_bytes += data.len() as u64;
         debug!("used space now {} bytes", self.used_bytes);
 
-        if let Some(e) = error {
-            Err(e)
-        } else {
-            Ok(bucket_path.into_os_string())
-        }
+        Ok(bucket_path.into_os_string())
     }
 
     fn free_bucket(&mut self, bucket_path: &OsStr) -> io::Result<u64> {

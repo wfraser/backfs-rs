@@ -3,7 +3,6 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
-use std::boxed::Box;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
@@ -58,30 +57,26 @@ macro_rules! trylog {
     }
 }
 
-pub enum CacheBlockMapFileEntryResult {
-    Entry(Box<CacheBlockMapFileEntry>),
-    StaleDataPresent,
-}
-
-pub trait CacheBlockMapFileEntry {
-    fn get(&self, block: u64) -> io::Result<Option<OsString>>;
-    fn put(&self, block: u64, bucket_path: &OsStr) -> io::Result<()>;
+#[must_use]
+#[derive(PartialEq)]
+pub enum CacheBlockMapFileResult {
+    Current,
+    Stale,
+    NotPresent,
 }
 
 pub trait CacheBlockMap {
-    fn get_file_entry(&mut self, path: &OsStr, mtime: i64)
-        -> io::Result<CacheBlockMapFileEntryResult>;
-    fn invalidate_path<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
+    fn check_file_mtime(&self, path: &OsStr, mtime: i64) -> io::Result<CacheBlockMapFileResult>;
+    fn set_file_mtime(&mut self, path: &OsStr, mtime: i64) -> io::Result<()>;
+    fn get_block(&self, path: &OsStr, block: u64) -> io::Result<Option<OsString>>;
+    fn put_block(&mut self, path: &OsStr, block: u64, bucket_path: &OsStr) -> io::Result<()>;
+    fn invalidate_path<F>(&mut self, path: &OsStr, delete_handler: F) -> io::Result<()>
         where F: FnMut(&OsStr) -> io::Result<()>;
     fn unmap_bucket(&mut self, bucket_path: &OsStr) -> io::Result<()>;
 }
 
 pub struct FSCacheBlockMap {
     map_dir: OsString,
-}
-
-pub struct FSCacheBlockMapFileEntry {
-    file_map_dir: OsString,
 }
 
 impl FSCacheBlockMap {
@@ -146,34 +141,53 @@ impl FSCacheBlockMap {
 }
 
 impl CacheBlockMap for FSCacheBlockMap {
-    fn get_file_entry(&mut self, path: &OsStr, mtime: i64)
-            -> io::Result<CacheBlockMapFileEntryResult> {
-        let map_path = self.map_path(path);
-        debug!("get_file_entry: {:?}", map_path);
-
-        trylog!(fs::create_dir_all(&map_path),
-                "get_file_entry: error creating {:?}", map_path);
-
-        let mtime_path = map_path.join("mtime");
-        match utils::read_number_file(&mtime_path, None::<i64>) {
+    fn check_file_mtime(&self, path: &OsStr, mtime: i64) -> io::Result<CacheBlockMapFileResult> {
+        let mtime_file = self.map_path(path).join("mtime");
+        match utils::read_number_file(&mtime_file, None::<i64>) {
             Ok(Some(n)) => {
-                if n != mtime {
-                    info!("cached data is stale: {:?}", path);
-                    return Ok(CacheBlockMapFileEntryResult::StaleDataPresent);
+                if n == mtime {
+                    Ok(CacheBlockMapFileResult::Current)
+                } else {
+                    Ok(CacheBlockMapFileResult::Stale)
                 }
             },
-            Ok(None) => {
-                try!(utils::write_number_file(&mtime_path, mtime));
-            },
+            Ok(None) => Ok(CacheBlockMapFileResult::NotPresent),
             Err(e) => {
-                error!("problem with mtime file {:?}: {}", &mtime_path, e);
-                return Err(e);
+                error!("problem with mtime file {:?}: {}", &mtime_file, e);
+                Err(e)
             }
         }
+    }
 
-        Ok(CacheBlockMapFileEntryResult::Entry(Box::new(FSCacheBlockMapFileEntry {
-            file_map_dir: map_path.into_os_string()
-        })))
+    fn set_file_mtime(&mut self, path: &OsStr, mtime: i64) -> io::Result<()> {
+        let file_map_dir = self.map_path(path);
+        trylog!(fs::create_dir_all(&file_map_dir),
+                "set_file_mtime: error creating {:?}", file_map_dir);
+
+        let mtime_file = file_map_dir.join("mtime");
+        trylog!(utils::write_number_file(&mtime_file, mtime),
+                "failed to write mtime file {:?}", mtime_file);
+
+        Ok(())
+    }
+
+    fn get_block(&self, path: &OsStr, block: u64) -> io::Result<Option<OsString>> {
+        let file_map_dir = self.map_path(path);
+        match link::getlink(&file_map_dir, &format!("{}", block)) {
+            Ok(Some(pathbuf)) => Ok(Some(pathbuf.into_os_string())),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e)
+        }
+    }
+
+    fn put_block(&mut self, path: &OsStr, block: u64, bucket_path: &OsStr) -> io::Result<()> {
+        debug!("mapping {:?}/{} to {:?}", path, block, bucket_path);
+        let file_block = self.map_path(path).join(format!("{}", block));
+        trylog!(link::makelink("", &file_block, Some(bucket_path)),
+                "error making map link from {:?} to {:?}", &file_block, bucket_path);
+        trylog!(link::makelink(bucket_path, "parent", Some(&file_block)),
+                "error making parent link from bucket {:?} back to map {:?}", bucket_path, file_block);
+        Ok(())
     }
 
     fn invalidate_path<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
@@ -198,6 +212,7 @@ impl CacheBlockMap for FSCacheBlockMap {
                 return Err(e);
             }
         };
+        debug!("unmapping {:?}", &map_block_path);
 
         trylog!(fs::remove_file(&map_block_path),
                 "unable to remove map block link {:?}", map_block_path);
@@ -207,21 +222,6 @@ impl CacheBlockMap for FSCacheBlockMap {
 
         // TODO: clean up parents
 
-        Ok(())
-    }
-}
-
-impl CacheBlockMapFileEntry for FSCacheBlockMapFileEntry {
-    fn get(&self, block: u64) -> io::Result<Option<OsString>> {
-        match link::getlink(&self.file_map_dir, &format!("{}", block)) {
-            Ok(Some(pathbuf)) => Ok(Some(pathbuf.into_os_string())),
-            Ok(None) => Ok(None),
-            Err(e) => Err(e)
-        }
-    }
-    fn put(&self, block: u64, bucket_path: &OsStr) -> io::Result<()> {
-        trylog!(link::makelink(&self.file_map_dir, &format!("{}", block), Some(bucket_path)),
-                "error making map link from {:?}/{} to {:?}", &self.file_map_dir, block, bucket_path);
         Ok(())
     }
 }

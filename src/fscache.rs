@@ -8,10 +8,9 @@ use std::fmt::Debug;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use block_map::{CacheBlockMap, CacheBlockMapFileEntry, CacheBlockMapFileEntryResult};
+use block_map::{CacheBlockMap, CacheBlockMapFileResult};
 use bucket_store::CacheBucketStore;
 
-use libc;
 use log;
 
 pub struct FSCache<M: CacheBlockMap, S: CacheBucketStore> {
@@ -82,22 +81,33 @@ impl<M: CacheBlockMap, S: CacheBucketStore> FSCache<M, S> {
         }
     }
 
-    fn write_block_to_cache(&mut self, path: &OsStr, block: u64, data: &[u8],
-                            entry: &mut CacheBlockMapFileEntry)
-                            -> io::Result<()> {
-        let map = &mut self.map;
-        let bucket_path = match self.store.put(data, |freed_bucket| map.unmap_bucket(freed_bucket)) {
-            Ok(path) => path,
+    fn try_get_cached_block(&mut self, path: &OsStr, block: u64) -> io::Result<Option<Vec<u8>>> {
+        let bucket_path = match self.map.get_block(path, block) {
+            Ok(Some(bucket_path)) => bucket_path,
+            Ok(None) => {
+                return Ok(None)
+            },
             Err(e) => {
-                if e.raw_os_error() != Some(libc::ENOSPC) {
-                    error!("error writing data into cache: {}", e);
-                }
+                error!("failed to get bucket path for block {} of {:?}: {}", block, path, e);
                 return Err(e);
             }
         };
 
-        trylog!(entry.put(block, &bucket_path),
-                "error mapping cache bucket {:?} to {:?}/{}", bucket_path, path, block);
+        match self.store.get(&bucket_path) {
+            Ok(data) => Ok(Some(data)),
+            Err(e) => {
+                error!("error reading cached data for block {} of {:?}: {}", block, path, e);
+                Err(e)
+            }
+        }
+    }
+
+    fn write_block_into_cache(&mut self, path: &OsStr, block: u64, data: &[u8]) -> io::Result<()> {
+        let map = &mut self.map;
+        let bucket_path = trylog!(self.store.put(data, |freed_bucket| map.unmap_bucket(freed_bucket).and(Ok(()))),
+                                  "failed to write to cache");
+        trylog!(map.put_block(path, block, &bucket_path),
+                "failed to map bucket {:?} into map for block {:?}/{}", bucket_path, path, block);
         Ok(())
     }
 }
@@ -146,23 +156,20 @@ impl<M: CacheBlockMap, S: CacheBucketStore> Cache for FSCache<M, S> {
     fn fetch<F>(&mut self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
             -> io::Result<Vec<u8>>
             where F: Read + Seek {
-        let mut file_entry: Box<CacheBlockMapFileEntry> = match self.map.get_file_entry(path, mtime) {
-            Ok(CacheBlockMapFileEntryResult::Entry(entry)) => entry,
-            Ok(CacheBlockMapFileEntryResult::StaleDataPresent) => {
-                info!("invalidating stale data for {:?}", path);
-                trylog!(self.invalidate_path(path),
-                        "unable to invalidate {:?}", path);
-                if let Ok(CacheBlockMapFileEntryResult::Entry(entry)) = self.map.get_file_entry(path, mtime) {
-                    entry
-                } else {
-                    panic!("still couldn't get an entry after invalidation!");
-                }
-            }
-            Err(e) => {
-                error!("error getting a map file entry for {:?}: {}", path, e);
-                return Err(e);
-            }
-        };
+
+        let freshness = trylog!(self.map.check_file_mtime(path, mtime),
+                                "error checking cache freshness for {:?}", path);
+
+        if freshness == CacheBlockMapFileResult::Stale {
+            info!("cache data for {:?} is stale; invalidating", path);
+            let store = &mut self.store;
+            trylog!(self.map.invalidate_path(path, |bucket_path| store.free_bucket(bucket_path).and(Ok(()))),
+                    "failed to invalidate stale cache data for {:?}", path);
+        }
+
+        if freshness != CacheBlockMapFileResult::Current {
+            try!(self.map.set_file_mtime(path, mtime));
+        }
 
         let first_block = offset / self.block_size;
         let last_block = (offset + size - 1) / self.block_size;
@@ -174,21 +181,13 @@ impl<M: CacheBlockMap, S: CacheBucketStore> Cache for FSCache<M, S> {
         for block in first_block..(last_block + 1) {
             debug!("fetching block {}", block);
 
-            let mut block_data: Vec<u8> = match file_entry.get(block) {
-                Ok(Some(bucket_path)) => {
-                    match self.store.get(&bucket_path) {
-                        Ok(data) => {
-                            info!("cache hit: got {:#x} to {:#x} from {:?}",
-                                  block * self.block_size,
-                                  block * self.block_size + data.len() as u64,
-                                  path);
-                            data
-                        },
-                        Err(e) => {
-                            error!("error reading cached data for block {} of {:?}: {}", block, path, e);
-                            return Err(e);
-                        }
-                    }
+            let mut block_data: Vec<u8> = match self.try_get_cached_block(path, block) {
+                Ok(Some(data)) => {
+                    info!("cache hit: got {:#x} to {:#x} from {:?}",
+                          block * self.block_size,
+                          block * self.block_size + data.len() as u64,
+                          path);
+                    data
                 },
                 Ok(None) => {
                     info!("cache miss: reading {:#x} to {:#x} from {:?}",
@@ -214,27 +213,8 @@ impl<M: CacheBlockMap, S: CacheBucketStore> Cache for FSCache<M, S> {
                         buf.truncate(nread as usize);
                     }
 
-                    while let Err(e) = self.write_block_to_cache(path, block, &buf, &mut *file_entry) {
-                        if e.raw_os_error().unwrap() == libc::ENOSPC {
-                            info!("writing to cache failed; freeing some space");
-                            match self.store.delete_something() {
-                                Ok((bucket_path, n)) => {
-                                    debug!("freed {} bytes from {:?}", n, bucket_path);
-                                    if let Err(e) = self.map.unmap_bucket(&bucket_path) {
-                                        error!("error removing bucket {:?} from the map", bucket_path);
-                                        return Err(e);
-                                    }
-                                },
-                                Err(e) => {
-                                    error!("error freeing space for cache data: {}", e);
-                                    return Err(e);
-                                }
-                            }
-                        } else {
-                            error!("unhandled error writing to cache: {}", e);
-                            break;
-                        }
-                    }
+                    trylog!(self.write_block_into_cache(path, block, &buf),
+                            "unhandled error writing to cache");
 
                     buf
                 },
