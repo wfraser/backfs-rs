@@ -48,17 +48,16 @@ fn test_fscache_init() {
 
 fn test_fscache_basic(block_size: u64) {
     let data_str = "ABCDEFGHIJKLMN!";
-    let mut data: Cursor<Vec<u8>> = Cursor::new(Vec::from(data_str));
+    let mut data = Cursor::new(Vec::from(data_str));
+    let filename = OsStr::new("hello.txt");
     let mtime = 1;
     let max_size = Some(100);
 
     let (mut cache, map_sneak, store_sneak) = construct_cache(block_size, max_size);
     assert!(cache.init().is_ok());
 
-    let map = (&map_sneak as &Borrow<TestMap>).borrow();
-    let store = (&store_sneak as &Borrow<TestBucketStore>).borrow();
-
-    let filename = OsStr::new("hello.txt");
+    let map: &TestMap = map_sneak.borrow();
+    let store: &TestBucketStore = store_sneak.borrow();
 
     let fetched: Vec<u8> = cache.fetch(filename, 0, 1024, &mut data, mtime).unwrap();
     assert_eq!(&fetched, data.get_ref());
@@ -85,8 +84,37 @@ fn test_fscache_basic(block_size: u64) {
 
 #[test]
 fn test_fscache_block_sizes() {
+    // Check for fencepost errors by doing this with varying block sizes.
     for block_size in 1..31 {
         stderrln!("block size {}", block_size);
         test_fscache_basic(block_size);
     }
+}
+
+#[test]
+fn test_fscache_out_of_range_read() {
+    let data_str = "ABCDEFGHIJKLMN!";
+    let mut data = Cursor::new(Vec::from(data_str));
+    let filename = OsStr::new("hello.txt");
+    let mtime = 1;
+    let block_size = 10;
+    let max_size = Some(100);
+
+    let (mut cache, map_sneak, store_sneak) = construct_cache(block_size, max_size);
+    assert!(cache.init().is_ok());
+
+    let map: &TestMap = map_sneak.borrow();
+    let store: &TestBucketStore = store_sneak.borrow();
+
+    // Read 10 bytes at offset 30 (past the end of the file).
+    let fetched: Vec<u8> = cache.fetch(filename, 30, 10, &mut data, mtime).unwrap();
+
+    // We should get empty data, but no error.
+    assert_eq!(&fetched, &[0u8; 0]);
+
+    // Make sure no blocks were mapped.
+    assert!(map.map[filename].blocks.is_empty());
+
+    // Also make sure no buckets got allocated or used.
+    assert!(store.buckets.is_empty());
 }
