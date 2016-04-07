@@ -10,13 +10,13 @@ use std::io;
 extern crate backfs_rs;
 use backfs_rs::block_map::*;
 
-struct TestMapData {
-    mtime: i64,
-    blocks: BTreeMap<u64, OsString>,
+pub struct TestMapData {
+    pub mtime: i64,
+    pub blocks: BTreeMap<u64, OsString>,
 }
 
 pub struct TestMap {
-    map: BTreeMap<OsString, TestMapData>,
+    pub map: BTreeMap<OsString, TestMapData>,
 }
 
 impl TestMap {

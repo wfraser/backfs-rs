@@ -64,7 +64,8 @@ const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
 pub struct BackFS {
     pub settings: BackfsSettings,
     inode_table: InodeTable,
-    fscache: FSCache<FSCacheBlockMap, FSCacheBucketStore<FSLL>>,
+    fscache: FSCache<FSCacheBlockMap, FSCacheBucketStore<FSLL>,
+                     FSCacheBlockMap, FSCacheBucketStore<FSLL>>,
 }
 
 macro_rules! log2 {

@@ -13,16 +13,16 @@ extern crate libc;
 extern crate backfs_rs;
 use backfs_rs::bucket_store::*;
 
-struct TestBucket {
-    data: Option<Vec<u8>>,
+pub struct TestBucket {
+    pub data: Option<Vec<u8>>,
 }
 
 pub struct TestBucketStore {
-    buckets: Vec<TestBucket>,
-    used_list: LinkedList<usize>,
-    free_list: LinkedList<usize>,
-    used_bytes: u64,
-    max_bytes: Option<u64>,
+    pub buckets: Vec<TestBucket>,
+    pub used_list: LinkedList<usize>,
+    pub free_list: LinkedList<usize>,
+    pub used_bytes: u64,
+    pub max_bytes: Option<u64>,
 }
 
 fn parse_path(path: &OsStr) -> usize {

@@ -3,9 +3,11 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
+use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsStr;
 use std::fmt::Debug;
 use std::io::{self, Read, Seek, SeekFrom};
+use std::marker::PhantomData;
 use std::path::Path;
 
 use block_map::{CacheBlockMap, CacheBlockMapFileResult};
@@ -13,10 +15,12 @@ use bucket_store::CacheBucketStore;
 
 use log;
 
-pub struct FSCache<M: CacheBlockMap, S: CacheBucketStore> {
+pub struct FSCache<M, S, X1, X2> {
     map: M,
     store: S,
     block_size: u64,
+    phantom1: PhantomData<X1>,
+    phantom2: PhantomData<X2>
 }
 
 macro_rules! log2 {
@@ -72,17 +76,21 @@ pub trait Cache {
         where F: Read + Seek;
 }
 
-impl<M: CacheBlockMap, S: CacheBucketStore> FSCache<M, S> {
-    pub fn new(map: M, store: S, block_size: u64) -> FSCache<M, S> {
+impl<M, S, X1, X2> FSCache<M, S, X1, X2>
+        where M: BorrowMut<X1>, X1: CacheBlockMap,
+              S: BorrowMut<X2>, X2: CacheBucketStore {
+    pub fn new(map: M, store: S, block_size: u64) -> FSCache<M, S, X1, X2> {
         FSCache {
             map: map,
             store: store,
             block_size: block_size,
+            phantom1: PhantomData,
+            phantom2: PhantomData,
         }
     }
 
     fn try_get_cached_block(&mut self, path: &OsStr, block: u64) -> io::Result<Option<Vec<u8>>> {
-        let bucket_path = match self.map.get_block(path, block) {
+        let bucket_path = match self.map.borrow().get_block(path, block) {
             Ok(Some(bucket_path)) => bucket_path,
             Ok(None) => {
                 return Ok(None)
@@ -93,7 +101,7 @@ impl<M: CacheBlockMap, S: CacheBucketStore> FSCache<M, S> {
             }
         };
 
-        match self.store.get(&bucket_path) {
+        match self.store.borrow().get(&bucket_path) {
             Ok(data) => Ok(Some(data)),
             Err(e) => {
                 error!("error reading cached data for block {} of {:?}: {}", block, path, e);
@@ -103,8 +111,8 @@ impl<M: CacheBlockMap, S: CacheBucketStore> FSCache<M, S> {
     }
 
     fn write_block_into_cache(&mut self, path: &OsStr, block: u64, data: &[u8]) -> io::Result<()> {
-        let map = &mut self.map;
-        let bucket_path = trylog!(self.store.put(data, |freed_bucket| map.unmap_bucket(freed_bucket).and(Ok(()))),
+        let map = self.map.borrow_mut();
+        let bucket_path = trylog!(self.store.borrow_mut().put(data, |freed_bucket| map.unmap_bucket(freed_bucket).and(Ok(()))),
                                   "failed to write to cache");
         trylog!(map.put_block(path, block, &bucket_path),
                 "failed to map bucket {:?} into map for block {:?}/{}", bucket_path, path, block);
@@ -112,18 +120,20 @@ impl<M: CacheBlockMap, S: CacheBucketStore> FSCache<M, S> {
     }
 }
 
-impl<M: CacheBlockMap, S: CacheBucketStore> Cache for FSCache<M, S> {
+impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
+        where M: BorrowMut<X1>, X1: CacheBlockMap,
+              S: BorrowMut<X2>, X2: CacheBucketStore {
     fn init(&mut self) -> io::Result<()> {
-        let map = &mut self.map;
-        self.store.init(|freed_bucket| map.unmap_bucket(freed_bucket))
+        let map = self.map.borrow_mut();
+        self.store.borrow_mut().init(|freed_bucket| map.unmap_bucket(freed_bucket))
     }
 
     fn used_size(&self) -> u64 {
-        self.store.used_bytes()
+        self.store.borrow().used_bytes()
     }
 
     fn max_size(&self) -> io::Result<u64> {
-        match self.store.max_bytes() {
+        match self.store.borrow().max_bytes() {
             //None => self.get_fs_size(&self.buckets_dir)
             None => Ok(1), // TODO!!
             Some(n) => Ok(n)
@@ -133,8 +143,8 @@ impl<M: CacheBlockMap, S: CacheBucketStore> Cache for FSCache<M, S> {
     fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&mut self, path: &T) -> io::Result<()> {
         let path: &Path = path.as_ref();
         debug!("invalidate_path: {:?}", path);
-        let store = &mut self.store;
-        self.map.invalidate_path(path.as_os_str(), |ref bucket_path| {
+        let store = self.store.borrow_mut();
+        self.map.borrow_mut().invalidate_path(path.as_os_str(), |ref bucket_path| {
             match store.free_bucket(&bucket_path) {
                 Ok(n) => {
                     info!("freed {} bytes from bucket {:?}", n, bucket_path);
@@ -157,18 +167,18 @@ impl<M: CacheBlockMap, S: CacheBucketStore> Cache for FSCache<M, S> {
             -> io::Result<Vec<u8>>
             where F: Read + Seek {
 
-        let freshness = trylog!(self.map.check_file_mtime(path, mtime),
+        let freshness = trylog!(self.map.borrow().check_file_mtime(path, mtime),
                                 "error checking cache freshness for {:?}", path);
 
         if freshness == CacheBlockMapFileResult::Stale {
             info!("cache data for {:?} is stale; invalidating", path);
-            let store = &mut self.store;
-            trylog!(self.map.invalidate_path(path, |bucket_path| store.free_bucket(bucket_path).and(Ok(()))),
+            let store = self.store.borrow_mut();
+            trylog!(self.map.borrow_mut().invalidate_path(path, |bucket_path| store.free_bucket(bucket_path).and(Ok(()))),
                     "failed to invalidate stale cache data for {:?}", path);
         }
 
         if freshness != CacheBlockMapFileResult::Current {
-            try!(self.map.set_file_mtime(path, mtime));
+            try!(self.map.borrow_mut().set_file_mtime(path, mtime));
         }
 
         let first_block = offset / self.block_size;
