@@ -111,6 +111,7 @@ impl<M, S, X1, X2> FSCache<M, S, X1, X2>
     }
 
     fn write_block_into_cache(&mut self, path: &OsStr, block: u64, data: &[u8]) -> io::Result<()> {
+        assert!(data.len() > 0);
         let map = self.map.borrow_mut();
         let bucket_path = trylog!(self.store.borrow_mut().put(data, |freed_bucket| map.unmap_bucket(freed_bucket).and(Ok(()))),
                                   "failed to write to cache");
@@ -223,8 +224,10 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
                         buf.truncate(nread as usize);
                     }
 
-                    trylog!(self.write_block_into_cache(path, block, &buf),
-                            "unhandled error writing to cache");
+                    if nread > 0 {
+                        trylog!(self.write_block_into_cache(path, block, &buf),
+                                "unhandled error writing to cache");
+                    }
 
                     buf
                 },
