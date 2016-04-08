@@ -80,6 +80,7 @@ impl CacheBucketStore for TestBucketStore {
         self.used_list.push_front(index);
 
         self.buckets.index_mut(index).data = Some(Vec::from(data));
+        self.used_bytes += data.len() as u64;
 
         Ok(OsString::from(format!("{}", index)))
     }
