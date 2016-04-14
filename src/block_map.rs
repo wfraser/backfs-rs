@@ -70,9 +70,10 @@ pub trait CacheBlockMap {
     fn set_file_mtime(&mut self, path: &OsStr, mtime: i64) -> io::Result<()>;
     fn get_block(&self, path: &OsStr, block: u64) -> io::Result<Option<OsString>>;
     fn put_block(&mut self, path: &OsStr, block: u64, bucket_path: &OsStr) -> io::Result<()>;
+    fn get_block_path(&self, path: &OsStr, block: u64) -> OsString;
     fn invalidate_path<F>(&mut self, path: &OsStr, delete_handler: F) -> io::Result<()>
         where F: FnMut(&OsStr) -> io::Result<()>;
-    fn unmap_bucket(&mut self, bucket_path: &OsStr) -> io::Result<()>;
+    fn unmap_block(&mut self, block_path: &OsStr) -> io::Result<()>;
 }
 
 pub struct FSCacheBlockMap {
@@ -185,9 +186,12 @@ impl CacheBlockMap for FSCacheBlockMap {
         let file_block = self.map_path(path).join(format!("{}", block));
         trylog!(link::makelink("", &file_block, Some(bucket_path)),
                 "error making map link from {:?} to {:?}", &file_block, bucket_path);
-        trylog!(link::makelink(bucket_path, "parent", Some(&file_block)),
-                "error making parent link from bucket {:?} back to map {:?}", bucket_path, file_block);
+        debug_assert_eq!(link::getlink(bucket_path, "parent").unwrap(), Some(file_block));
         Ok(())
+    }
+
+    fn get_block_path(&self, path: &OsStr, block: u64) -> OsString {
+        self.map_path(path).join(format!("{}", block)).into_os_string()
     }
 
     fn invalidate_path<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
@@ -199,26 +203,11 @@ impl CacheBlockMap for FSCacheBlockMap {
         Ok(())
     }
 
-    fn unmap_bucket(&mut self, bucket_path: &OsStr) -> io::Result<()> {
-        let map_block_path = match link::getlink(bucket_path, "parent") {
-            Ok(Some(path)) => path,
-            Ok(None) => {
-                // We have no idea where this bucket is mapped...
-                warn!("trying to unmap a bucket that lacks a parent link: {:?}", bucket_path);
-                return Ok(());
-            }
-            Err(e) => {
-                error!("unable to read parent link from bucket {:?}: {}", bucket_path, e);
-                return Err(e);
-            }
-        };
+    fn unmap_block(&mut self, map_block_path: &OsStr) -> io::Result<()> {
         debug!("unmapping {:?}", &map_block_path);
 
         trylog!(fs::remove_file(&map_block_path),
                 "unable to remove map block link {:?}", map_block_path);
-
-        trylog!(link::makelink(bucket_path, "parent", None::<&Path>),
-                "unable to remove parent link in {:?}", bucket_path);
 
         // TODO: clean up parents
 

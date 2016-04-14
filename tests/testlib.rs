@@ -3,15 +3,15 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsStr;
 use std::io::{self, Cursor, Write};
 use std::str;
 
 extern crate backfs_rs;
 use backfs_rs::fscache::*;
-//use backfs_rs::block_map::*;
-//use backfs_rs::bucket_store::*;
+use backfs_rs::block_map::*;
+use backfs_rs::bucket_store::*;
 
 mod test_block_map;
 use test_block_map::*;
@@ -54,7 +54,7 @@ fn test_fscache_basic(block_size: u64) {
     let max_size = Some(100);
 
     let (mut cache, map_sneak, store_sneak) = construct_cache(block_size, max_size);
-    assert!(cache.init().is_ok());
+    cache.init().unwrap();
 
     let map: &TestMap = map_sneak.borrow();
     let store: &TestBucketStore = store_sneak.borrow();
@@ -101,7 +101,7 @@ fn test_fscache_out_of_range_read() {
     let max_size = Some(100);
 
     let (mut cache, map_sneak, store_sneak) = construct_cache(block_size, max_size);
-    assert!(cache.init().is_ok());
+    cache.init().unwrap();
 
     let map: &TestMap = map_sneak.borrow();
     let store: &TestBucketStore = store_sneak.borrow();
@@ -117,4 +117,56 @@ fn test_fscache_out_of_range_read() {
 
     // Also make sure no buckets got allocated or used.
     assert!(store.buckets.is_empty());
+}
+
+#[test]
+#[ignore] // currently broken until free_orphaned_buckets is implemented
+fn test_fscache_free_orphans() {
+    let filler = "ABCDEFGHIJKLMN!";
+    let mtime = 1;
+    let block_size = filler.len() as u64;
+    let num_blocks_per_file = 10u64;
+    let max_size = None;
+    let filenames = vec!["one", "two", "three", "four", "five"];
+    let (mut cache, mut map_sneak, mut store_sneak) = construct_cache(block_size, max_size);
+
+    let mut map: &mut TestMap = map_sneak.borrow_mut();
+    let mut store: &mut TestBucketStore = store_sneak.borrow_mut();
+
+    // pre-load the cache with blocks of each of the files.
+    for filename in &filenames {
+        let osname = OsStr::new(filename);
+        map.set_file_mtime(osname, mtime).unwrap();
+        for i in 0..num_blocks_per_file {
+            let map_path = map.get_block_path(osname, i);
+            let bucket = store.put(&map_path, filler.as_bytes(), |path| {
+                panic!("unexpected delete of bucket {:?} while writing {:?}/{}",
+                    path,
+                    osname,
+                    i);
+            }).unwrap();
+            map.put_block(osname, i, &bucket).unwrap();
+        }
+    }
+
+    cache.init().unwrap();
+
+    // Verify the expected used size.
+    assert_eq!(cache.used_size(), filenames.len() as u64 * num_blocks_per_file * block_size);
+    // Verify the correct number of buckets were allocated.
+    assert_eq!(store.buckets.len(), filenames.len() * num_blocks_per_file as usize);
+    // And that no buckets have been freed.
+    assert!(store.free_list.is_empty());
+
+    cache.free_orphaned_buckets().unwrap();
+
+    // Nothing should have been freed yet.
+    assert!(store.free_list.is_empty());
+
+    map.map.remove(OsStr::new("three"));
+
+    cache.free_orphaned_buckets().unwrap();
+
+    assert_eq!(store.free_list.len() as u64, num_blocks_per_file);
+    assert_eq!(store.used_bytes(), (filenames.len() as u64 - 1) * num_blocks_per_file * block_size);
 }

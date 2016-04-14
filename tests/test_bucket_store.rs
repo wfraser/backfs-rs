@@ -15,6 +15,7 @@ use backfs_rs::bucket_store::*;
 
 pub struct TestBucket {
     pub data: Option<Vec<u8>>,
+    pub parent: Option<OsString>,
 }
 
 pub struct TestBucketStore {
@@ -61,7 +62,7 @@ impl CacheBucketStore for TestBucketStore {
         }
     }
 
-    fn put<F>(&mut self, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
+    fn put<F>(&mut self, parent: &OsStr, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
             where F: FnMut(&OsStr) -> io::Result<()> {
         while self.max_bytes.is_some() && self.used_bytes + data.len() as u64 > self.max_bytes.unwrap() {
             let (bucket_path, _) = self.delete_something().unwrap();
@@ -71,7 +72,7 @@ impl CacheBucketStore for TestBucketStore {
         }
 
         let index = if self.free_list.is_empty() {
-            self.buckets.push(TestBucket { data: None });
+            self.buckets.push(TestBucket { data: None, parent: Some(parent.to_os_string()) });
             self.buckets.len() - 1
         } else {
             self.free_list.pop_front().unwrap()
@@ -110,9 +111,10 @@ impl CacheBucketStore for TestBucketStore {
         let mut bucket = self.buckets.index_mut(number);
         let n = bucket.data.as_ref().unwrap().len() as u64;
         bucket.data = None;
+        let parent = ::std::mem::replace(&mut bucket.parent, None);
 
         self.used_bytes -= n;
-        Ok((OsString::from(format!("{}", number)), n))
+        Ok((parent.unwrap(), n))
     }
 
     fn used_bytes(&self) -> u64 {

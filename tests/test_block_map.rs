@@ -6,6 +6,8 @@
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::io;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::str;
 
 extern crate backfs_rs;
 use backfs_rs::block_map::*;
@@ -74,14 +76,31 @@ impl CacheBlockMap for TestMap {
         }
     }
 
+    fn get_block_path(&self, path: &OsStr, block: u64) -> OsString {
+        let mut bytes = Vec::from(path.as_bytes());
+        bytes.append(&mut format!("/{}", block).into_bytes());
+        OsString::from_vec(bytes)
+    }
+
     fn invalidate_path<F>(&mut self, _path: &OsStr, _f: F) -> io::Result<()>
             where F: FnMut(&OsStr) -> io::Result<()> {
         // TODO
         unimplemented!();
     }
 
+    /*
     fn unmap_bucket(&mut self, bucket_path: &OsStr) -> io::Result<()> {
         self.map.remove(bucket_path);
+        Ok(())
+    }
+    */
+
+    fn unmap_block(&mut self, block_path: &OsStr) -> io::Result<()> {
+        let parts: Vec<&[u8]> = block_path.as_bytes().rsplitn(2, |byte| *byte == b'/').collect();
+        let path = OsStr::from_bytes(parts[0]);
+        let block: u64 = str::from_utf8(&parts[0][1..]).unwrap().parse().unwrap();
+        let file = self.map.get_mut(path).unwrap();
+        file.blocks.remove(&block);
         Ok(())
     }
 }

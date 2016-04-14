@@ -113,7 +113,8 @@ impl<M, S, X1, X2> FSCache<M, S, X1, X2>
     fn write_block_into_cache(&mut self, path: &OsStr, block: u64, data: &[u8]) -> io::Result<()> {
         assert!(data.len() > 0);
         let map = self.map.borrow_mut();
-        let bucket_path = trylog!(self.store.borrow_mut().put(data, |freed_bucket| map.unmap_bucket(freed_bucket).and(Ok(()))),
+        let map_path = map.get_block_path(path, block);
+        let bucket_path = trylog!(self.store.borrow_mut().put(&map_path, data, |map_path| map.unmap_block(map_path).and(Ok(()))),
                                   "failed to write to cache");
         trylog!(map.put_block(path, block, &bucket_path),
                 "failed to map bucket {:?} into map for block {:?}/{}", bucket_path, path, block);
@@ -126,7 +127,7 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
               S: BorrowMut<X2>, X2: CacheBucketStore {
     fn init(&mut self) -> io::Result<()> {
         let map = self.map.borrow_mut();
-        self.store.borrow_mut().init(|freed_bucket| map.unmap_bucket(freed_bucket))
+        self.store.borrow_mut().init(|map_path| map.unmap_block(map_path))
     }
 
     fn used_size(&self) -> u64 {

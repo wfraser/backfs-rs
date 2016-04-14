@@ -9,20 +9,17 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use fsll::PathLinkedList;
+use link;
 use utils;
 
 use libc;
 use log;
 
-// TODO:
-// CacheBucketStore::put should require the parent (aka map) path as an argument.
-// CacheBucketStore::delete_something should return the parent path instead of the bucket path.
-
 pub trait CacheBucketStore {
     fn init<F>(&mut self, mut delete_handler: F) -> io::Result<()>
         where F: FnMut(&OsStr) -> io::Result<()>;
     fn get(&self, bucket_path: &OsStr) -> io::Result<Vec<u8>>;
-    fn put<F>(&mut self, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
+    fn put<F>(&mut self, parent: &OsStr, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
         where F: FnMut(&OsStr) -> io::Result<()>;
     fn free_bucket(&mut self, bucket_path: &OsStr) -> io::Result<u64>;
     fn delete_something(&mut self) -> io::Result<(OsString, u64)>;
@@ -221,8 +218,8 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
         if self.max_bytes.is_some() && self.used_bytes > self.max_bytes.unwrap() {
             warn!("cache is over-size; freeing buckets until it is within limits");
             while self.used_bytes > self.max_bytes.unwrap() {
-                let (freed_bucket, _) = try!(self.delete_something());
-                trylog!(delete_handler(&freed_bucket),
+                let (map_path, _) = try!(self.delete_something());
+                trylog!(delete_handler(&map_path),
                         "delete handler returned error");
             }
         }
@@ -251,15 +248,15 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
         }
     }
 
-    fn put<F>(&mut self, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
+    fn put<F>(&mut self, parent: &OsStr, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
             where F: FnMut(&OsStr) -> io::Result<()> {
         loop {
             let bytes_needed = self.free_bytes_needed_for_write(data.len() as u64);
             if bytes_needed > 0 {
                 info!("put: need to free {} bytes", bytes_needed);
-                let (bucket_path, _) = trylog!(self.delete_something(),
+                let (map_path, _) = trylog!(self.delete_something(),
                                                "put: error freeing up space");
-                trylog!(delete_handler(&bucket_path),
+                trylog!(delete_handler(&map_path),
                         "put: delete handler returned error");
             } else {
                 break;
@@ -268,6 +265,9 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
 
         let bucket_path: PathBuf = trylog!(self.get_bucket(),
                                            "put: error getting bucket");
+
+        trylog!(link::makelink(&bucket_path, "parent", Some(parent)),
+                "failed to write parent link from bucket {:?} to {:?}", bucket_path, parent);
 
         let data_path = bucket_path.join("data");
 
@@ -283,9 +283,9 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
                 Err(e) => {
                     if e.raw_os_error() == Some(libc::ENOSPC) {
                         info!("put: out of space; freeing buckets");
-                        let (freed_bucket, n) = trylog!(self.delete_something(),
+                        let (map_path, n) = trylog!(self.delete_something(),
                                                         "put: error freeing up space");
-                        trylog!(delete_handler(&freed_bucket),
+                        trylog!(delete_handler(&map_path),
                                 "put: delete handler returned error");
                         info!("freed {} bytes; trying the write again", n);
                     } else {
@@ -336,9 +336,21 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
                 return Err(io::Error::from_raw_os_error(libc::EINVAL));
             },
         };
+        let parent: PathBuf = match link::getlink(&bucket_path, "parent") {
+            Ok(Some(path)) => path,
+            Ok(None) => {
+                error!("delete_something: bucket {:?} has no parent", bucket_path);
+                return Err(io::Error::from_raw_os_error(libc::EINVAL));
+            },
+            Err(e) => {
+                error!("delete_something: error reading parent link for {:?}: {}",
+                       bucket_path, e);
+                return Err(e);
+            }
+        };
         let bytes_freed = trylog!(self.free_bucket(bucket_path.as_os_str()),
                                   "error freeing bucket {:?}", bucket_path);
-        Ok((bucket_path.into_os_string(), bytes_freed))
+        Ok((parent.into_os_string(), bytes_freed))
     }
 
     fn used_bytes(&self) -> u64 {
