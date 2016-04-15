@@ -74,6 +74,7 @@ pub trait CacheBlockMap {
     fn invalidate_path<F>(&mut self, path: &OsStr, delete_handler: F) -> io::Result<()>
         where F: FnMut(&OsStr) -> io::Result<()>;
     fn unmap_block(&mut self, block_path: &OsStr) -> io::Result<()>;
+    fn is_block_mapped(&self, block_path: &OsStr) -> io::Result<bool>;
 }
 
 pub struct FSCacheBlockMap {
@@ -212,5 +213,11 @@ impl CacheBlockMap for FSCacheBlockMap {
         // TODO: clean up parents
 
         Ok(())
+    }
+
+    fn is_block_mapped(&self, block_path: &OsStr) -> io::Result<bool> {
+        let bucket_path = trylog!(link::getlink("", block_path),
+                                  "is_block_mapped: error reading link {:?}", block_path);
+        Ok(bucket_path.is_some())
     }
 }

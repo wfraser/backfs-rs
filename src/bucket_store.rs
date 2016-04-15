@@ -17,14 +17,17 @@ use log;
 
 pub trait CacheBucketStore {
     fn init<F>(&mut self, mut delete_handler: F) -> io::Result<()>
-        where F: FnMut(&OsStr) -> io::Result<()>;
+        where F: FnMut(/* deleted bucket parent path */ &OsStr) -> io::Result<()>;
     fn get(&self, bucket_path: &OsStr) -> io::Result<Vec<u8>>;
     fn put<F>(&mut self, parent: &OsStr, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
-        where F: FnMut(&OsStr) -> io::Result<()>;
+        where F: FnMut(/* deleted bucket parent path */ &OsStr) -> io::Result<()>;
     fn free_bucket(&mut self, bucket_path: &OsStr) -> io::Result<u64>;
     fn delete_something(&mut self) -> io::Result<(OsString, u64)>;
     fn used_bytes(&self) -> u64;
     fn max_bytes(&self) -> Option<u64>;
+    fn enumerate_buckets<F>(&self, mut handler: F) -> io::Result<()>
+        where F: FnMut(/* bucket path */ &OsStr,
+                       /* parent path */ Option<&OsStr>) -> io::Result<()>;
 }
 
 pub struct FSCacheBucketStore<LL: PathLinkedList> {
@@ -103,12 +106,10 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
         utils::write_number_file(&path, bucket_number)
     }
 
-    fn compute_cache_used_size(&mut self) -> io::Result<u64> {
-        let mut size = 0u64;
-
+    fn for_each_bucket<F>(&self, mut handler: F) -> io::Result<()>
+            where F: FnMut(&OsStr) -> io::Result<()> {
         let readdir = trylog!(fs::read_dir(Path::new(&self.buckets_dir)),
                               "error getting directory listing for bucket directory");
-
         for entry_result in readdir {
             let entry = trylog!(entry_result, "error reading directory entry");
             let filetype = trylog!(entry.file_type(),
@@ -128,7 +129,20 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
             let mut path: OsString = self.buckets_dir.clone();
             path.push(&OsString::from("/"));
             path.push(entry.file_name());
-            path.push(&OsString::from("/data"));
+
+            if let Err(e) = handler(path.as_os_str()) {
+                error!("for_each_bucket: handler returned {}", e);
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    fn compute_cache_used_size(&mut self) -> io::Result<u64> {
+        let mut size = 0u64;
+
+        try!(self.for_each_bucket(|bucket_path| {
+            let path = PathBuf::from(bucket_path).join("data");
 
             let len = match fs::File::open(&path) {
                 Ok(file) => {
@@ -146,7 +160,8 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
             };
 
             size += len;
-        }
+            Ok(())
+        }));
 
         info!("cache used size: {} bytes", size);
 
@@ -359,5 +374,20 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
 
     fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
+    }
+
+    fn enumerate_buckets<F>(&self, mut handler: F) -> io::Result<()>
+            where F: FnMut(&OsStr, Option<&OsStr>) -> io::Result<()> {
+
+        try!(self.for_each_bucket(|bucket_path| {
+            let parent_opt = trylog!(link::getlink(bucket_path, "parent"),
+                                     "Failed to read parent link for {:?}", bucket_path);
+            let parent_osstr_opt = parent_opt.as_ref().map(|x| x.as_ref());
+            trylog!(handler(bucket_path, parent_osstr_opt),
+                    "enumerate_buckets: handler returned");
+            Ok(())
+        }));
+
+        Ok(())
     }
 }

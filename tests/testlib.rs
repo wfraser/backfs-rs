@@ -120,7 +120,6 @@ fn test_fscache_out_of_range_read() {
 }
 
 #[test]
-#[ignore] // currently broken until free_orphaned_buckets is implemented
 fn test_fscache_free_orphans() {
     let filler = "ABCDEFGHIJKLMN!";
     let mtime = 1;

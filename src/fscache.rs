@@ -162,7 +162,25 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
 
     fn free_orphaned_buckets(&mut self) -> io::Result<()> {
         debug!("free_orphaned_buckets");
-        unimplemented!();
+
+        let mut orphans = vec![];
+        let map = self.map.borrow();
+        try!(self.store.borrow_mut().enumerate_buckets(|bucket_path, parent_opt| {
+            if let Some(parent) = parent_opt {
+                if !try!(map.is_block_mapped(parent)) {
+                    warn!("bucket {:?} is an orphan; it was parented to {:?}",
+                             bucket_path, parent);
+                    orphans.push(bucket_path.to_os_string());
+                }
+            }
+            Ok(())
+        }));
+
+        for bucket in orphans {
+            try!(self.store.borrow_mut().free_bucket(&bucket));
+        }
+
+        Ok(())
     }
 
     fn fetch<F>(&mut self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)

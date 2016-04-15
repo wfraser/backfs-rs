@@ -32,7 +32,7 @@ fn parse_path(path: &OsStr) -> usize {
 
 fn list_disconnect<T>(list: &mut LinkedList<T>, index: usize) -> T {
     let mut after: LinkedList<T> = list.split_off(index);
-    let elem = list.pop_back().unwrap();
+    let elem = after.pop_front().unwrap();
     list.append(&mut after);
     elem
 }
@@ -123,5 +123,16 @@ impl CacheBucketStore for TestBucketStore {
 
     fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
+    }
+
+    fn enumerate_buckets<F>(&self, mut handler: F) -> io::Result<()>
+            where F: FnMut(&OsStr, Option<&OsStr>) -> io::Result<()> {
+        for i in 0 .. self.buckets.len() {
+            let path = format!("{}", i);
+            let parent_opt = &self.buckets[i].parent;
+            let parent_opt_ref = parent_opt.as_ref().map(|x| x.as_ref());
+            handler(&OsStr::new(&path), parent_opt_ref).unwrap();
+        }
+        Ok(())
     }
 }

@@ -103,4 +103,14 @@ impl CacheBlockMap for TestMap {
         file.blocks.remove(&block);
         Ok(())
     }
+
+    fn is_block_mapped(&self, block_path: &OsStr) -> io::Result<bool> {
+        let parts: Vec<&[u8]> = block_path.as_bytes().rsplitn(2, |byte| *byte == b'/').collect();
+        let path = OsStr::from_bytes(parts[1]);
+        let block: u64 = str::from_utf8(&parts[0]).unwrap().parse().unwrap();
+        Ok(match self.map.get(path) {
+            Some(file_entry) => file_entry.blocks.contains_key(&block),
+            None => false
+        })
+    }
 }
