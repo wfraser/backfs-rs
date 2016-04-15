@@ -22,31 +22,19 @@ impl<T: Deref> VecDeref<T> for Vec<T> {
     }
 }
 
-mod arg_parse;
-use arg_parse::BackfsSettings;
-
-mod backfs;
-use backfs::BackFS;
-
-mod fscache;
-mod fsll;
-mod inodetable;
-mod libc_wrappers;
-mod link;
 mod log_output;
 
 mod osstrextras;
 use osstrextras::OsStrExtras;
 
-extern crate daemonize;
+extern crate backfs_rs;
+use backfs_rs::backfs::{self, BackFS};
+use backfs_rs::arg_parse::{self, BackfsSettings};
+
 extern crate fuse;
 extern crate libc;
-extern crate syslog;
-extern crate time;
-extern crate walkdir;
-
-#[macro_use]
 extern crate log;
+extern crate syslog;
 
 fn redirect_input_to_null() -> io::Result<()> {
     unsafe {
