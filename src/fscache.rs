@@ -68,7 +68,7 @@ macro_rules! trylog {
 pub trait Cache {
     fn init(&mut self) -> io::Result<()>;
     fn used_size(&self) -> u64;
-    fn max_size(&self) -> io::Result<u64>;
+    fn max_size(&self) -> Option<u64>;
     fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&mut self, path: &T) -> io::Result<()>;
     fn free_orphaned_buckets(&mut self) -> io::Result<()>;
     fn fetch<F>(&mut self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
@@ -134,12 +134,8 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
         self.store.borrow().used_bytes()
     }
 
-    fn max_size(&self) -> io::Result<u64> {
-        match self.store.borrow().max_bytes() {
-            //None => self.get_fs_size(&self.buckets_dir)
-            None => Ok(1), // TODO!!
-            Some(n) => Ok(n)
-        }
+    fn max_size(&self) -> Option<u64> {
+        self.store.borrow().max_bytes()
     }
 
     fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&mut self, path: &T) -> io::Result<()> {

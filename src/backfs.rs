@@ -4,10 +4,11 @@
 //
 
 use std::cmp;
-use std::ffi::{CStr, OsStr, OsString};
+use std::ffi::{CStr, CString, OsStr, OsString};
 use std::fs;
 use std::fs::File;
 use std::io;
+use std::mem;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
@@ -262,11 +263,16 @@ impl BackFS {
         }
 
         let max_cache = if self.settings.cache_size == 0 {
-            match self.fscache.max_size() {
-                Ok(n) => n,
-                Err(e) => {
+            unsafe {
+                let path_bytes = Vec::from(self.settings.cache.as_os_str().as_bytes());
+                let path_c = CString::from_vec_unchecked(path_bytes);
+                let mut statbuf: libc::statvfs = mem::zeroed();
+                if -1 == libc::statvfs(path_c.into_raw(), mem::transmute(&mut statbuf )) {
+                    let e = io::Error::last_os_error();
                     println!("Error: failed to statvfs on the cache filesystem: {}", e);
                     return Err(e);
+                } else {
+                    statbuf.f_bsize as u64 * statbuf.f_blocks as u64
                 }
             }
         } else {
