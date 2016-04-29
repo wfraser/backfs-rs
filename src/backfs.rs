@@ -207,7 +207,12 @@ impl BackFS {
             },
             Err(e) => {
                 let err = io::Error::from_raw_os_error(e);
-                error!("lstat({:?}): {}", path, err);
+                if e == libc::ENOENT {
+                    // avoid being overly noisy
+                    debug!("lstat({:?}: {}", path, err);
+                } else {
+                    error!("lstat({:?}): {}", path, err);
+                }
                 Err(err)
             }
         }
