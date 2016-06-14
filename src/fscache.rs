@@ -196,14 +196,13 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
         if freshness != CacheBlockMapFileResult::Current {
             // TODO: make a macro for this type of retry loop
             loop {
-                if let Err(e) = self.map.borrow_mut().set_file_mtime(path, mtime) {
-                    if e.raw_os_error() == Some(::libc::ENOSPC) {
-                        try!(self.store.borrow_mut().delete_something());
-                    } else {
-                        return Err(e);
-                    }
-                } else {
-                    break;
+                match self.map.borrow_mut().set_file_mtime(path, mtime) {
+                    Err(e) => {
+                        if e.raw_os_error() == Some(::libc::ENOSPC) {
+                            try!(self.store.borrow_mut().delete_something());
+                        }
+                    },
+                    Ok(()) => { break; },
                 }
             }
         }
