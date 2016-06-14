@@ -194,7 +194,18 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
         }
 
         if freshness != CacheBlockMapFileResult::Current {
-            try!(self.map.borrow_mut().set_file_mtime(path, mtime));
+            // TODO: make a macro for this type of retry loop
+            loop {
+                if let Err(e) = self.map.borrow_mut().set_file_mtime(path, mtime) {
+                    if e.raw_os_error() == Some(::libc::ENOSPC) {
+                        try!(self.store.borrow_mut().delete_something());
+                    } else {
+                        return Err(e);
+                    }
+                } else {
+                    break;
+                }
+            }
         }
 
         let first_block = offset / self.block_size;
