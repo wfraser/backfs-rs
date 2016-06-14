@@ -6,9 +6,10 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsStr;
 use std::fmt::Debug;
+use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::marker::PhantomData;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use block_map::{CacheBlockMap, CacheBlockMapFileResult};
 use bucket_store::CacheBucketStore;
@@ -159,21 +160,25 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
     fn free_orphaned_buckets(&mut self) -> io::Result<()> {
         debug!("free_orphaned_buckets");
 
-        let mut orphans = vec![];
+        let mut orphans: Vec<PathBuf> = vec![];
         let map = self.map.borrow();
         try!(self.store.borrow_mut().enumerate_buckets(|bucket_path, parent_opt| {
             if let Some(parent) = parent_opt {
                 if !try!(map.is_block_mapped(parent)) {
                     warn!("bucket {:?} is an orphan; it was parented to {:?}",
                              bucket_path, parent);
-                    orphans.push(bucket_path.to_os_string());
+                    orphans.push(PathBuf::from(bucket_path));
                 }
             }
             Ok(())
         }));
 
         for bucket in orphans {
-            try!(self.store.borrow_mut().free_bucket(&bucket));
+            try!(self.store.borrow_mut().free_bucket(bucket.as_os_str()));
+            // HACK: fscache shouldn't be managing these parent links; they're owned by the map.
+            // However, orphaned buckets only happen due to the map losing them somehow (usually
+            // intentionally by manual editing), so it can't manage them in this case.
+            fs::remove_file(bucket.join("parent")).unwrap();
         }
 
         Ok(())
