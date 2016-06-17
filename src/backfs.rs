@@ -14,7 +14,6 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::str;
 
 use arg_parse::BackfsSettings;
@@ -211,7 +210,7 @@ impl BackFS {
         }
     }
 
-    fn backfs_control_file_write(&self, data: &[u8], reply: ReplyWrite) {
+    fn backfs_control_file_write(&self, data: &[u8]) -> ResultWrite {
         // remove a trailing newline if it exists
         let data_trimmed = if data.last() == Some(&0x0A) {
             &data[..data.len() - 1]
@@ -230,8 +229,7 @@ impl BackFS {
 
         match command {
             "test" => {
-                reply.error(libc::EXDEV);
-                return;
+                return Err(libc::EXDEV);
             },
             "noop" => (),
             "invalidate" => {
@@ -241,12 +239,11 @@ impl BackFS {
                 let _ignore_errors = self.fscache.borrow_mut().free_orphaned_buckets();
             },
             _ => {
-                reply.error(libc::EBADMSG);
-                return;
+                return Err(libc::EBADMSG);
             }
         }
 
-        reply.written(data.len() as u32);
+        Ok(data.len() as u32)
     }
 
     fn internal_init(&self) -> io::Result<()> {
@@ -462,153 +459,121 @@ impl FilesystemMT for BackFS {
         }
     }
 
-    /*
-    fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
-        if let Some(path) = self.inode_table.get_path(ino) {
-            debug!("open: {:?} flags={:#x}", path, flags);
+    fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
+        debug!("open: {:?} flags={:#x}", path, flags);
 
-            if match path.to_str() {
-                Some(BACKFS_CONTROL_FILE_PATH) => true,
-                Some(BACKFS_VERSION_FILE_PATH) => true,
-                _ => false
-            } {
-                reply.opened(0, flags);
-                return;
+        if match path.to_str() {
+            Some(BACKFS_CONTROL_FILE_PATH) => true,
+            Some(BACKFS_VERSION_FILE_PATH) => true,
+            _ => false
+        } {
+            return Ok((0, flags));
+        }
+
+        let real_path = self.real_path(&path);
+
+        match libc_wrappers::open(real_path, flags as libc::c_int) {
+            Ok(fh) => { Ok((fh as u64, flags)) },
+            Err(e) => {
+                error!("open({:?}): {}", path, io::Error::from_raw_os_error(e));
+                Err(e)
             }
-
-            let real_path = self.real_path(&path);
-
-            match libc_wrappers::open(real_path, flags as libc::c_int) {
-                Ok(fh) => { reply.opened(fh as u64, flags); },
-                Err(e) => {
-                    error!("open({:?}): {}", path, io::Error::from_raw_os_error(e));
-                    reply.error(e);
-                }
-            }
-        } else {
-            error!("open: could not resolve inode {}", ino);
-            reply.error(libc::ENOENT);
         }
     }
 
-    fn release(&mut self, _req: &Request, ino: u64, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool, reply: ReplyEmpty) {
-        if let Some(path) = self.inode_table.get_path(ino) {
-            debug!("release: {:?}", path);
+    fn release(&self, _req: RequestInfo, path: &Path, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool) -> ResultEmpty {
+        debug!("release: {:?}", path);
 
-            match libc_wrappers::close(fh as usize) {
-                Ok(()) => { reply.ok(); },
-                Err(e) => {
-                    error!("close({:?}): {}", path, io::Error::from_raw_os_error(e));
-                    reply.error(e);
-                }
+        match libc_wrappers::close(fh as usize) {
+            Ok(()) => { Ok(()) },
+            Err(e) => {
+                error!("close({:?}): {}", path, io::Error::from_raw_os_error(e));
+                Err(e)
             }
-        } else {
-            error!("release: could not resolve inode {}", ino);
-            reply.error(libc::ENOENT);
         }
     }
 
-    fn read(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, size: u32, reply: ReplyData) {
-        if let Some(path) = self.inode_table.get_path(ino) {
-            debug!("read: {:?} {:#x} @ {:#x}", path, size, offset);
+    fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
+        debug!("read: {:?} {:#x} @ {:#x}", path, size, offset);
 
-            let fake_data: Option<&[u8]> = match path.to_str() {
-                Some(BACKFS_CONTROL_FILE_PATH) => Some(BACKFS_CONTROL_FILE_HELP.as_bytes()),
-                Some(BACKFS_VERSION_FILE_PATH) => Some(BACKFS_VERSION.as_bytes()),
-                _ => None
-            };
+        let fake_data: Option<&[u8]> = match path.to_str() {
+            Some(BACKFS_CONTROL_FILE_PATH) => Some(BACKFS_CONTROL_FILE_HELP.as_bytes()),
+            Some(BACKFS_VERSION_FILE_PATH) => Some(BACKFS_VERSION.as_bytes()),
+            _ => None
+        };
 
-            if let Some(data) = fake_data {
-                if offset as usize >= data.len() {
-                    // Request out of range; return empty result.
-                    reply.data(&[0; 0]);
-                } else {
-                    let end = cmp::min(data.len(), (offset as usize + size as usize));
-                    reply.data(&data[offset as usize .. end]);
-                }
-                return;
+        if let Some(data) = fake_data {
+            if offset as usize >= data.len() {
+                // Request out of range; return empty result.
+                return Ok(vec![]);
+            } else {
+                let end = cmp::min(data.len(), (offset as usize + size as usize));
+                return Ok(Vec::from(&data[offset as usize .. end]));
             }
-
-            let mut real_file = unsafe { File::from_raw_fd(fh as libc::c_int) };
-
-            let mtime = match real_file.metadata() {
-                Ok(metadata) => metadata.mtime() as i64,
-                Err(e) => {
-                    error!("unable to get metadata from {:?}: {}", path, e);
-                    reply.error(e.raw_os_error().unwrap());
-                    return;
-                }
-            };
-
-            match self.fscache.fetch(&path, offset, size as u64, &mut real_file, mtime) {
-                Ok(data) => {
-                    reply.data(&data);
-                },
-                Err(e) => {
-                    reply.error(e.raw_os_error().unwrap());
-                }
-            }
-
-            // Release control of the file descriptor, so it is not closed when this function
-            // returns.
-            real_file.into_raw_fd();
-
-        } else {
-            error!("read: could not resolve inode {}", ino);
-            reply.error(libc::ENOENT);
         }
+
+        let mut real_file = unsafe { File::from_raw_fd(fh as libc::c_int) };
+
+        let mtime = match real_file.metadata() {
+            Ok(metadata) => metadata.mtime() as i64,
+            Err(e) => {
+                error!("unable to get metadata from {:?}: {}", path, e);
+                return Err(e.raw_os_error().unwrap());
+            }
+        };
+
+        let result = match self.fscache.borrow_mut().fetch(path.as_os_str(), offset, size as u64, &mut real_file, mtime) {
+            Ok(data) => {
+                Ok(data)
+            },
+            Err(e) => {
+                Err(e.raw_os_error().unwrap())
+            }
+        };
+
+        // Release control of the file descriptor, so it is not closed when this function
+        // returns.
+        real_file.into_raw_fd();
+
+        result
     }
 
-    fn write(&mut self, _req: &Request, ino: u64, _fh: u64, offset: u64, data: &[u8], _flags: u32, reply: ReplyWrite) {
-        if let Some(path) = self.inode_table.get_path(ino) {
-            debug!("write: {:?} {:#x}@{:#x}", path, data.len(), offset);
+    fn write(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, data: &[u8], _flags: u32) -> ResultWrite {
+        debug!("write: {:?} {:#x}@{:#x}", path, data.len(), offset);
 
-            match path.to_str() {
-                Some(BACKFS_CONTROL_FILE_PATH) => {
-                    self.backfs_control_file_write(data, reply);
-                    return;
-                },
-                Some(BACKFS_VERSION_FILE_PATH) => {
-                    reply.error(libc::EACCES);
-                    return;
-                }
-                _ => ()
+        match path.to_str() {
+            Some(BACKFS_CONTROL_FILE_PATH) => {
+                return self.backfs_control_file_write(data);
+            },
+            Some(BACKFS_VERSION_FILE_PATH) => {
+                return Err(libc::EACCES);
             }
-
-            if !self.settings.rw {
-                reply.error(libc::EROFS);
-                return;
-            }
-
-            // TODO
-            reply.error(libc::ENOSYS);
-        } else {
-            error!("write: could not resolve inode {}", ino);
-            reply.error(libc::ENOENT);
+            _ => ()
         }
+
+        if !self.settings.rw {
+            return Err(libc::EROFS);
+        }
+
+        // TODO
+        Err(libc::ENOSYS)
     }
 
-    fn readlink(&mut self, _req: &Request, ino: u64, reply: ReplyData) {
-        if let Some(path) = self.inode_table.get_path(ino) {
-            debug!("readlink: {:?}", path);
+    fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
+        debug!("readlink: {:?}", path);
 
-            let real_path = self.real_path(&path);
+        let real_path = self.real_path(&path);
 
-            match fs::read_link(&real_path) {
-                Ok(path) => {
-                    reply.data(path.into_os_string().into_vec().as_ref());
-                },
-                Err(e) => {
-                    error!("readlink({:?}): {}", real_path, e);
-                    reply.error(e.raw_os_error().unwrap());
-                }
+        match fs::read_link(&real_path) {
+            Ok(path) => {
+                Ok(path.into_os_string().into_vec())
+            },
+            Err(e) => {
+                error!("readlink({:?}): {}", real_path, e);
+                Err(e.raw_os_error().unwrap())
             }
-        } else {
-            error!("readlink: could not resolve inode {}", ino);
-            reply.error(libc::ENOENT);
         }
     }
-    */
 
     // TODO: implement the rest of the syscalls needed
 }
