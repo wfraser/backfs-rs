@@ -3,7 +3,6 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
-use std::cell::RefCell;
 use std::cmp;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::fs;
@@ -62,8 +61,8 @@ const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
 
 pub struct BackFS {
     pub settings: BackfsSettings,
-    fscache: RefCell<FSCache<FSCacheBlockMap, FSCacheBucketStore<FSLL>,
-                             FSCacheBlockMap, FSCacheBucketStore<FSLL>>>,
+    fscache: FSCache<FSCacheBlockMap, FSCacheBucketStore<FSLL>,
+                     FSCacheBlockMap, FSCacheBucketStore<FSLL>>,
 }
 
 macro_rules! log2 {
@@ -155,7 +154,7 @@ impl BackFS {
                                             settings.block_size, max_bytes);
 
         BackFS {
-            fscache: RefCell::new(FSCache::new(map, store, settings.block_size)),
+            fscache: FSCache::new(map, store, settings.block_size),
             settings: settings,
         }
     }
@@ -233,10 +232,10 @@ impl BackFS {
             },
             "noop" => (),
             "invalidate" => {
-                let _ignore_errors = self.fscache.borrow_mut().invalidate_path(arg);
+                let _ignore_errors = self.fscache.invalidate_path(arg);
             },
             "free_orphans" => {
-                let _ignore_errors = self.fscache.borrow_mut().free_orphaned_buckets();
+                let _ignore_errors = self.fscache.free_orphaned_buckets();
             },
             _ => {
                 return Err(libc::EBADMSG);
@@ -248,9 +247,8 @@ impl BackFS {
 
     fn internal_init(&self) -> io::Result<()> {
         println!("BackFS: Initializing cache and scanning existing cache directory...");
-        let mut fscache = self.fscache.borrow_mut();
 
-        if let Err(e) = fscache.init() {
+        if let Err(e) = self.fscache.init() {
             println!("Error: Failed to initialize cache: {}", e);
             return Err(e);
         }
@@ -273,16 +271,13 @@ impl BackFS {
         };
 
         println!("BackFS: Cache: {} used out of {} ({:.2} %).",
-                 human_number(fscache.used_size()),
+                 human_number(self.fscache.used_size()),
                  human_number(max_cache),
-                 (fscache.used_size() as f64 / max_cache as f64 * 100.));
+                 (self.fscache.used_size() as f64 / max_cache as f64 * 100.));
 
         Ok(())
     }
 }
-
-// TODO FIXME: implement locking around the fscache member when it is borrow_mut()'d
-unsafe impl Sync for BackFS {}
 
 impl FilesystemMT for BackFS {
     fn init(&self, _req: RequestInfo) -> ResultEmpty {
@@ -522,7 +517,7 @@ impl FilesystemMT for BackFS {
             }
         };
 
-        let result = match self.fscache.borrow_mut().fetch(path.as_os_str(), offset, size as u64, &mut real_file, mtime) {
+        let result = match self.fscache.fetch(path.as_os_str(), offset, size as u64, &mut real_file, mtime) {
             Ok(data) => {
                 Ok(data)
             },
