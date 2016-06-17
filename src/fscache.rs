@@ -3,13 +3,14 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 use std::ffi::OsStr;
 use std::fmt::Debug;
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
 use block_map::{CacheBlockMap, CacheBlockMapFileResult};
 use bucket_store::CacheBucketStore;
@@ -17,8 +18,8 @@ use bucket_store::CacheBucketStore;
 use log;
 
 pub struct FSCache<M, S, X1, X2> {
-    map: M,
-    store: S,
+    map: RwLock<M>,
+    store: RwLock<S>,
     block_size: u64,
     phantom1: PhantomData<X1>,
     phantom2: PhantomData<X2>
@@ -67,12 +68,12 @@ macro_rules! trylog {
 }
 
 pub trait Cache {
-    fn init(&mut self) -> io::Result<()>;
+    fn init(&self) -> io::Result<()>;
     fn used_size(&self) -> u64;
     fn max_size(&self) -> Option<u64>;
-    fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&mut self, path: &T) -> io::Result<()>;
-    fn free_orphaned_buckets(&mut self) -> io::Result<()>;
-    fn fetch<F>(&mut self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
+    fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()>;
+    fn free_orphaned_buckets(&self) -> io::Result<()>;
+    fn fetch<F>(&self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
         -> io::Result<Vec<u8>>
         where F: Read + Seek;
 }
@@ -82,16 +83,19 @@ impl<M, S, X1, X2> FSCache<M, S, X1, X2>
               S: BorrowMut<X2>, X2: CacheBucketStore {
     pub fn new(map: M, store: S, block_size: u64) -> FSCache<M, S, X1, X2> {
         FSCache {
-            map: map,
-            store: store,
+            map: RwLock::new(map),
+            store: RwLock::new(store),
             block_size: block_size,
             phantom1: PhantomData,
             phantom2: PhantomData,
         }
     }
 
-    fn try_get_cached_block(&mut self, path: &OsStr, block: u64) -> io::Result<Option<Vec<u8>>> {
-        let bucket_path = match self.map.borrow().get_block(path, block) {
+    fn try_get_cached_block(&self, path: &OsStr, block: u64) -> io::Result<Option<Vec<u8>>> {
+        let map = self.map.read().unwrap();
+        let store = self.store.read().unwrap();
+
+        let bucket_path = match (*map).borrow().get_block(path, block) {
             Ok(Some(bucket_path)) => bucket_path,
             Ok(None) => {
                 return Ok(None)
@@ -102,7 +106,7 @@ impl<M, S, X1, X2> FSCache<M, S, X1, X2>
             }
         };
 
-        match self.store.borrow().get(&bucket_path) {
+        match (*store).borrow().get(&bucket_path) {
             Ok(data) => Ok(Some(data)),
             Err(e) => {
                 error!("error reading cached data for block {} of {:?}: {}", block, path, e);
@@ -111,13 +115,15 @@ impl<M, S, X1, X2> FSCache<M, S, X1, X2>
         }
     }
 
-    fn write_block_into_cache(&mut self, path: &OsStr, block: u64, data: &[u8]) -> io::Result<()> {
+    fn write_block_into_cache(&self, path: &OsStr, block: u64, data: &[u8]) -> io::Result<()> {
         assert!(data.len() > 0);
-        let map = self.map.borrow_mut();
-        let map_path = map.get_block_path(path, block);
-        let bucket_path = trylog!(self.store.borrow_mut().put(&map_path, data, |map_path| map.unmap_block(map_path).and(Ok(()))),
+        let mut map = self.map.write().unwrap();
+        let mut store = self.store.write().unwrap();
+
+        let map_path = (*map).borrow_mut().get_block_path(path, block);
+        let bucket_path = trylog!((*store).borrow_mut().put(&map_path, data, |map_path| (*map).borrow_mut().unmap_block(map_path).and(Ok(()))),
                                   "failed to write to cache");
-        trylog!(map.put_block(path, block, &bucket_path),
+        trylog!((*map).borrow_mut().put_block(path, block, &bucket_path),
                 "failed to map bucket {:?} into map for block {:?}/{}", bucket_path, path, block);
         Ok(())
     }
@@ -126,25 +132,26 @@ impl<M, S, X1, X2> FSCache<M, S, X1, X2>
 impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
         where M: BorrowMut<X1>, X1: CacheBlockMap,
               S: BorrowMut<X2>, X2: CacheBucketStore {
-    fn init(&mut self) -> io::Result<()> {
-        let map = self.map.borrow_mut();
-        self.store.borrow_mut().init(|map_path| map.unmap_block(map_path))
+    fn init(&self) -> io::Result<()> {
+        let mut map = self.map.write().unwrap();
+        let mut store = self.store.write().unwrap();
+        (*store).borrow_mut().init(|map_path| (*map).borrow_mut().unmap_block(map_path))
     }
 
     fn used_size(&self) -> u64 {
-        self.store.borrow().used_bytes()
+        (*self.store.read().unwrap()).borrow().used_bytes()
     }
 
     fn max_size(&self) -> Option<u64> {
-        self.store.borrow().max_bytes()
+        (*self.store.read().unwrap()).borrow().max_bytes()
     }
 
-    fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&mut self, path: &T) -> io::Result<()> {
+    fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()> {
         let path: &Path = path.as_ref();
         debug!("invalidate_path: {:?}", path);
-        let store = self.store.borrow_mut();
-        self.map.borrow_mut().invalidate_path(path.as_os_str(), |ref bucket_path| {
-            match store.free_bucket(&bucket_path) {
+        let mut store = self.store.write().unwrap();
+        (*self.map.write().unwrap()).borrow_mut().invalidate_path(path.as_os_str(), |ref bucket_path| {
+            match (*store).borrow_mut().free_bucket(&bucket_path) {
                 Ok(n) => {
                     info!("freed {} bytes from bucket {:?}", n, bucket_path);
                     Ok(())
@@ -157,54 +164,64 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
         })
     }
 
-    fn free_orphaned_buckets(&mut self) -> io::Result<()> {
+    fn free_orphaned_buckets(&self) -> io::Result<()> {
         debug!("free_orphaned_buckets");
 
         let mut orphans: Vec<PathBuf> = vec![];
-        let map = self.map.borrow();
-        try!(self.store.borrow_mut().enumerate_buckets(|bucket_path, parent_opt| {
-            if let Some(parent) = parent_opt {
-                if !try!(map.is_block_mapped(parent)) {
-                    warn!("bucket {:?} is an orphan; it was parented to {:?}",
-                             bucket_path, parent);
-                    orphans.push(PathBuf::from(bucket_path));
-                }
-            }
-            Ok(())
-        }));
 
-        for bucket in orphans {
-            try!(self.store.borrow_mut().free_bucket(bucket.as_os_str()));
-            // HACK: fscache shouldn't be managing these parent links; they're owned by the map.
-            // However, orphaned buckets only happen due to the map losing them somehow (usually
-            // intentionally by manual editing), so it can't manage them in this case.
-            fs::remove_file(bucket.join("parent")).unwrap();
+        {
+            let map_read = self.map.read().unwrap();
+            try!((*self.store.read().unwrap()).borrow().enumerate_buckets(|bucket_path, parent_opt| {
+                if let Some(parent) = parent_opt {
+                    if !try!((*map_read).borrow().is_block_mapped(parent)) {
+                        warn!("bucket {:?} is an orphan; it was parented to {:?}",
+                                 bucket_path, parent);
+                        orphans.push(PathBuf::from(bucket_path));
+                    }
+                }
+                Ok(())
+            }));
+        }
+
+        if !orphans.is_empty() {
+            let mut store_write = self.store.write().unwrap();
+            for bucket in orphans {
+                try!((*store_write).borrow_mut().free_bucket(bucket.as_os_str()));
+                // HACK: fscache shouldn't be managing these parent links; they're owned by the map.
+                // However, orphaned buckets only happen due to the map losing them somehow (usually
+                // intentionally by manual editing), so it can't manage them in this case.
+                fs::remove_file(bucket.join("parent")).unwrap();
+            }
         }
 
         Ok(())
     }
 
-    fn fetch<F>(&mut self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
+    fn fetch<F>(&self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
             -> io::Result<Vec<u8>>
             where F: Read + Seek {
 
-        let freshness = trylog!(self.map.borrow().check_file_mtime(path, mtime),
-                                "error checking cache freshness for {:?}", path);
+        let freshness = {
+            trylog!((*self.map.read().unwrap()).borrow().check_file_mtime(path, mtime),
+                    "error checking cache freshness for {:?}", path)
+        };
 
         if freshness == CacheBlockMapFileResult::Stale {
             info!("cache data for {:?} is stale; invalidating", path);
-            let store = self.store.borrow_mut();
-            trylog!(self.map.borrow_mut().invalidate_path(path, |bucket_path| store.free_bucket(bucket_path).and(Ok(()))),
+            let mut store = self.store.write().unwrap();
+            trylog!((*self.map.write().unwrap()).borrow_mut().invalidate_path(path, |bucket_path| (*store).borrow_mut().free_bucket(bucket_path).and(Ok(()))),
                     "failed to invalidate stale cache data for {:?}", path);
         }
 
         if freshness != CacheBlockMapFileResult::Current {
             // TODO: make a macro for this type of retry loop
+            let mut store = self.store.write().unwrap();
+            let mut map = self.map.write().unwrap();
             loop {
-                match self.map.borrow_mut().set_file_mtime(path, mtime) {
+                match (*map).borrow_mut().set_file_mtime(path, mtime) {
                     Err(e) => {
                         if e.raw_os_error() == Some(::libc::ENOSPC) {
-                            try!(self.store.borrow_mut().delete_something());
+                            try!((*store).borrow_mut().delete_something());
                         }
                     },
                     Ok(()) => { break; },
