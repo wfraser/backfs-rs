@@ -11,3 +11,5 @@ log = "0.3"
 syslog = "3.1"
 time = "0.1"
 walkdir = "0.1"
+fuse_mt = { git = "https://github.com/wfraser/fuse-mt.git" }
+#fuse_mt = { path = "../fuse-mt" }

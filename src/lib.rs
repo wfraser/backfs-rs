@@ -9,7 +9,6 @@ pub mod bucket_store;
 pub mod block_map;
 pub mod fscache;
 pub mod fsll;
-mod inodetable;
 mod libc_wrappers;
 mod link;
 mod utils;
@@ -17,6 +16,7 @@ mod osstrextras;
 
 extern crate daemonize;
 extern crate fuse;
+extern crate fuse_mt;
 extern crate libc;
 extern crate time;
 extern crate walkdir;

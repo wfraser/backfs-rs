@@ -4,6 +4,7 @@ version = "0.1.0"
 dependencies = [
  "daemonize 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "fuse 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fuse_mt 0.1.0 (git+https://github.com/wfraser/fuse-mt.git)",
  "libc 0.2.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "syslog 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -33,6 +34,18 @@ dependencies = [
  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "pkg-config 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "thread-scoped 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "fuse_mt"
+version = "0.1.0"
+source = "git+https://github.com/wfraser/fuse-mt.git#ff9a94193efdaf8588a5d3f45cdda73704e4415e"
+dependencies = [
+ "fuse 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "threadpool 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -79,6 +92,11 @@ dependencies = [
 [[package]]
 name = "thread-scoped"
 version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "threadpool"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
