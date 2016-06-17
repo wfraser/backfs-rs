@@ -42,7 +42,7 @@ fn construct_cache(block_size: u64, max_size: Option<u64>)
 fn test_fscache_init() {
     let map = TestMap::new();
     let store = TestBucketStore::new(Some(100));
-    let mut cache = FSCache::new(map, store, 10);
+    let cache = FSCache::new(map, store, 10);
     assert!(cache.init().is_ok());
 }
 
@@ -53,7 +53,7 @@ fn test_fscache_basic(block_size: u64) {
     let mtime = 1;
     let max_size = Some(100);
 
-    let (mut cache, map_sneak, store_sneak) = construct_cache(block_size, max_size);
+    let (cache, map_sneak, store_sneak) = construct_cache(block_size, max_size);
     cache.init().unwrap();
 
     let map: &TestMap = map_sneak.borrow();
@@ -100,7 +100,7 @@ fn test_fscache_out_of_range_read() {
     let block_size = 10;
     let max_size = Some(100);
 
-    let (mut cache, map_sneak, store_sneak) = construct_cache(block_size, max_size);
+    let (cache, map_sneak, store_sneak) = construct_cache(block_size, max_size);
     cache.init().unwrap();
 
     let map: &TestMap = map_sneak.borrow();
@@ -128,7 +128,7 @@ fn test_fscache_free_orphans() {
     let num_blocks_per_file = 10u64;
     let max_size = None;
     let filenames = vec!["one", "two", "three", "four", "five"];
-    let (mut cache, mut map_sneak, mut store_sneak) = construct_cache(block_size, max_size);
+    let (cache, mut map_sneak, mut store_sneak) = construct_cache(block_size, max_size);
 
     let mut map: &mut TestMap = map_sneak.borrow_mut();
     let mut store: &mut TestBucketStore = store_sneak.borrow_mut();
