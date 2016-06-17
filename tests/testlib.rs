@@ -120,6 +120,7 @@ fn test_fscache_out_of_range_read() {
 }
 
 #[test]
+#[ignore] // FIXME: see GitHub issue https://github.com/wfraser/backfs-rs/issues/1
 fn test_fscache_free_orphans() {
     let filler = "ABCDEFGHIJKLMN!";
     let mtime = 1;
