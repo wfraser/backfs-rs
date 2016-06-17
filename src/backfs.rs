@@ -3,6 +3,7 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
+use std::cell::RefCell;
 use std::cmp;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::fs;
@@ -21,12 +22,12 @@ use block_map::FSCacheBlockMap;
 use bucket_store::FSCacheBucketStore;
 use fscache::{FSCache, Cache};
 use fsll::FSLL;
-use inodetable::InodeTable;
 use libc_wrappers;
 use utils;
 
 use daemonize::Daemonize;
 use fuse::*;
+use fuse_mt::*;
 use libc;
 use log;
 use time::Timespec;
@@ -35,11 +36,9 @@ pub const BACKFS_VERSION: &'static str = "BackFS version: 0.1.0\n";
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
-// inode 2:
 const BACKFS_CONTROL_FILE_NAME: &'static str = ".backfs_control";
 const BACKFS_CONTROL_FILE_PATH: &'static str = "/.backfs_control";
 
-// inode 3:
 const BACKFS_VERSION_FILE_NAME: &'static str = ".backfs_version";
 const BACKFS_VERSION_FILE_PATH: &'static str = "/.backfs_version";
 
@@ -64,9 +63,8 @@ const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
 
 pub struct BackFS {
     pub settings: BackfsSettings,
-    inode_table: InodeTable,
-    fscache: FSCache<FSCacheBlockMap, FSCacheBucketStore<FSLL>,
-                     FSCacheBlockMap, FSCacheBucketStore<FSLL>>,
+    fscache: RefCell<FSCache<FSCacheBlockMap, FSCacheBucketStore<FSLL>,
+                             FSCacheBlockMap, FSCacheBucketStore<FSLL>>>,
 }
 
 macro_rules! log2 {
@@ -94,14 +92,12 @@ fn backfs_fake_file_attr(path: Option<&str>) -> Option<FileAttr> {
     match path {
         Some(BACKFS_CONTROL_FILE_PATH) => {
             let mut attr = BACKFS_FAKE_FILE_ATTRS.clone();
-            attr.ino = 2;
             attr.perm = 0o600; // -rw-------
             attr.size = BACKFS_CONTROL_FILE_HELP.as_bytes().len() as u64;
             Some(attr)
         },
         Some(BACKFS_VERSION_FILE_PATH) => {
             let mut attr = BACKFS_FAKE_FILE_ATTRS.clone();
-            attr.ino = 3;
             attr.perm = 0o444; // -r--r--r--
             attr.size = BACKFS_VERSION.as_bytes().len() as u64;
             Some(attr)
@@ -160,27 +156,24 @@ impl BackFS {
                                             settings.block_size, max_bytes);
 
         BackFS {
-            fscache: FSCache::new(map, store, settings.block_size),
+            fscache: RefCell::new(FSCache::new(map, store, settings.block_size)),
             settings: settings,
-            inode_table: InodeTable::new(),
         }
     }
 
-    fn real_path(&self, partial: &OsString) -> OsString {
+    fn real_path<T: AsRef<OsStr>>(&self, partial: &T) -> OsString {
         PathBuf::from(&self.settings.backing_fs)
                 .join(Path::new(partial).strip_prefix("/").unwrap())
                 .into_os_string()
     }
 
 
-    fn stat_real(&mut self, path: &Rc<OsString>) -> io::Result<FileAttr> {
-        let real: OsString = self.real_path(&path);
+    fn stat_real<T: AsRef<OsStr> + ::std::fmt::Debug>(&self, path: &T) -> io::Result<FileAttr> {
+        let real: OsString = self.real_path(path);
         debug!("stat_real: {:?}", real);
 
         match libc_wrappers::lstat(real) {
             Ok(stat) => {
-                let inode = self.inode_table.add_or_get(path.clone());
-
                 let kind = mode_to_filetype(stat.st_mode);
 
                 let mut mode = stat.st_mode & 0o7777; // st_mode encodes the type AND the mode.
@@ -189,7 +182,7 @@ impl BackFS {
                 }
 
                 Ok(FileAttr {
-                    ino: inode,
+                    ino: 0,
                     size: stat.st_size as u64,
                     blocks: stat.st_blocks as u64,
                     atime: Timespec { sec: stat.st_atime as i64, nsec: stat.st_atime_nsec as i32 },
@@ -218,7 +211,7 @@ impl BackFS {
         }
     }
 
-    fn backfs_control_file_write(&mut self, data: &[u8], reply: ReplyWrite) {
+    fn backfs_control_file_write(&self, data: &[u8], reply: ReplyWrite) {
         // remove a trailing newline if it exists
         let data_trimmed = if data.last() == Some(&0x0A) {
             &data[..data.len() - 1]
@@ -242,10 +235,10 @@ impl BackFS {
             },
             "noop" => (),
             "invalidate" => {
-                let _ignore_errors = self.fscache.invalidate_path(arg);
+                let _ignore_errors = self.fscache.borrow_mut().invalidate_path(arg);
             },
             "free_orphans" => {
-                let _ignore_errors = self.fscache.free_orphaned_buckets();
+                let _ignore_errors = self.fscache.borrow_mut().free_orphaned_buckets();
             },
             _ => {
                 reply.error(libc::EBADMSG);
@@ -256,13 +249,11 @@ impl BackFS {
         reply.written(data.len() as u32);
     }
 
-    fn internal_init(&mut self) -> io::Result<()> {
+    fn internal_init(&self) -> io::Result<()> {
         println!("BackFS: Initializing cache and scanning existing cache directory...");
-        self.inode_table.add(OsString::from("/"));
-        self.inode_table.add(OsString::from(BACKFS_CONTROL_FILE_PATH));
-        self.inode_table.add(OsString::from(BACKFS_VERSION_FILE_PATH));
+        let mut fscache = self.fscache.borrow_mut();
 
-        if let Err(e) = self.fscache.init() {
+        if let Err(e) = fscache.init() {
             println!("Error: Failed to initialize cache: {}", e);
             return Err(e);
         }
@@ -285,16 +276,19 @@ impl BackFS {
         };
 
         println!("BackFS: Cache: {} used out of {} ({:.2} %).",
-                 human_number(self.fscache.used_size()),
+                 human_number(fscache.used_size()),
                  human_number(max_cache),
-                 (self.fscache.used_size() as f64 / max_cache as f64 * 100.));
+                 (fscache.used_size() as f64 / max_cache as f64 * 100.));
 
         Ok(())
     }
 }
 
-impl Filesystem for BackFS {
-    fn init(&mut self, _req: &Request) -> Result<(), libc::c_int> {
+// TODO FIXME: implement locking around the fscache member when it is borrow_mut()'d
+unsafe impl Sync for BackFS {}
+
+impl FilesystemMT for BackFS {
+    fn init(&self, _req: RequestInfo) -> ResultEmpty {
         debug!("init");
 
         if let Err(e) = self.internal_init() {
@@ -316,222 +310,159 @@ impl Filesystem for BackFS {
         Ok(())
     }
 
-    fn destroy(&mut self, _req: &Request) {
+    fn destroy(&self, _req: RequestInfo) {
         debug!("destroy");
     }
 
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &Path, reply: ReplyEntry) {
-        if let Some(parent_path) = self.inode_table.get_path(parent) {
+    fn lookup(&self, _req: RequestInfo, parent_path: &Path, name: &Path) -> ResultEntry {
+        // Combine the parent path and the name being looked up.
+        let path = PathBuf::from(parent_path).join(name);
+        debug!("lookup: {:?}", path);
 
-            // Combine the parent path and the name being looked up.
-            let pathrc: Rc<OsString> = {
-                let mut path = (*parent_path).clone();
-                if path.to_str() != Some("/") {
-                    path.push(OsStr::new("/"));
-                }
-                path.push(name.as_os_str());
-                Rc::new(path)
-            };
-
-            debug!("lookup: {:?}", pathrc);
-
-            match backfs_fake_file_attr((*pathrc).to_str()) {
-                Some(attr) => {
-                    reply.entry(&TTL, &attr, 0);
-                    return;
-                }
-                None => ()
+        match backfs_fake_file_attr(path.to_str()) {
+            Some(attr) => {
+                return Ok((TTL, attr, 0));
             }
-
-            match self.stat_real(&pathrc) {
-                Ok(attr) => {
-                    reply.entry(&TTL, &attr, 0);
-                }
-                Err(e) => {
-                    let msg = format!("lookup: {:?}: {}", pathrc, e);
-                    if e.raw_os_error() == Some(libc::ENOENT) {
-                        debug!("{}", msg);
-                    } else {
-                        error!("{}", msg);
-                    }
-                    reply.error(e.raw_os_error().unwrap_or(libc::EIO));
-                }
-            }
-
-        } else {
-            error!("lookup: could not resolve parent inode {}", parent);
-            reply.error(libc::ENOENT);
+            None => ()
         }
-    }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        if let Some(path) = self.inode_table.get_path(ino) {
-            debug!("getattr: {}: {:?}", ino, path);
-
-            let pathrc = Rc::new(path);
-
-            match backfs_fake_file_attr((*pathrc).to_str()) {
-                Some(attr) => {
-                    reply.attr(&TTL, &attr);
-                    return;
-                }
-                None => ()
+        match self.stat_real(&path) {
+            Ok(attr) => {
+                Ok((TTL, attr, 0))
             }
-
-            match self.stat_real(&pathrc) {
-                Ok(attr) => {
-                    reply.attr(&TTL, &attr);
-                },
-                Err(e) => {
-                    error!("getattr: inode {}, path {:?}: {}", ino, pathrc, e);
-                    reply.error(e.raw_os_error().unwrap_or(libc::EIO));
-                }
-            }
-        } else {
-            error!("getattr: could not resolve inode {}", ino);
-            reply.error(libc::ENOENT);
-        }
-    }
-
-    fn opendir(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
-        if let Some(path) = self.inode_table.get_path(ino) {
-            debug!("opendir: {:?}", path);
-
-            let real: OsString = self.real_path(&path);
-            debug!("opendir: real = {:?}", real);
-
-            match libc_wrappers::opendir(real) {
-                Ok(fh) => reply.opened(fh as u64, 0),
-                Err(e) => reply.error(e)
-            }
-        } else {
-            error!("opendir: could not resolve inode {}", ino);
-            reply.error(libc::ENOENT);
-        }
-    }
-
-    fn readdir(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, mut reply: ReplyDirectory) {
-        if let Some(path) = self.inode_table.get_path(ino) {
-            debug!("readdir: {:?} @ {}", path, offset);
-
-            if fh == 0 {
-                error!("readdir: missing fh");
-                return;
-            }
-
-            let is_root = ino == 1;
-            let mut index = 0u64;
-
-            if offset == 0 {
-                let parent_inode = if is_root {
-                    ino
+            Err(e) => {
+                let msg = format!("lookup: {:?}: {}", path, e);
+                if e.raw_os_error() == Some(libc::ENOENT) {
+                    debug!("{}", msg);
                 } else {
-                    let parent_path = Path::new(path.as_os_str()).parent().unwrap();
-                    let parent: OsString = parent_path.to_path_buf().into_os_string();
-                    match self.inode_table.get_inode(&parent) {
-                        Some(inode) => inode,
-                        None => {
-                            error!("readdir: unable to get inode for parent of {:?}", path);
-                            reply.error(libc::EIO);
-                            return;
-                        }
-                    }
-                };
-
-                reply.add(ino, 0, FileType::Directory, ".");
-                reply.add(parent_inode, 1, FileType::Directory, "..");
-                index += 2;
-
-                if is_root {
-                    reply.add(2, 2, FileType::RegularFile, BACKFS_CONTROL_FILE_NAME);
-                    reply.add(3, 3, FileType::RegularFile, BACKFS_VERSION_FILE_NAME);
-                    index += 2;
+                    error!("{}", msg);
                 }
+                Err(e.raw_os_error().unwrap_or(libc::EIO))
             }
+        }
+    }
 
-            loop {
-                match libc_wrappers::readdir(fh as usize) {
-                    Ok(Some(entry)) => {
-                        let name_c = unsafe { CStr::from_ptr(entry.d_name.as_ptr()) };
-                        let name = OsStr::from_bytes(name_c.to_bytes());
+    fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultGetattr {
+        debug!("getattr: {:?}", path);
 
-                        let pathrc = {
-                            let mut entry_path = (*path).clone();
-                            if entry_path.to_str() != Some("/") {
-                                entry_path.push(OsStr::new("/"));
-                            }
-                            entry_path.push(name);
-                            Rc::new(entry_path)
-                        };
+        match backfs_fake_file_attr(path.to_str()) {
+            Some(attr) => {
+                return Ok((TTL, attr));
+            }
+            None => ()
+        }
 
-                        let inode = self.inode_table.add_or_get(pathrc.clone());
-                        let filetype = match entry.d_type {
-                            libc::DT_DIR => FileType::Directory,
-                            libc::DT_REG => FileType::RegularFile,
-                            libc::DT_LNK => FileType::Symlink,
-                            libc::DT_BLK => FileType::BlockDevice,
-                            libc::DT_CHR => FileType::CharDevice,
-                            libc::DT_FIFO => FileType::NamedPipe,
-                            libc::DT_SOCK => {
-                                warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
-                                FileType::NamedPipe
-                            },
-                            0 | _ => {
-                                let real_path = self.real_path(&*pathrc);
-                                match libc_wrappers::lstat(real_path) {
-                                    Ok(stat64) => mode_to_filetype(stat64.st_mode),
-                                    Err(errno) => {
-                                        let ioerr = io::Error::from_raw_os_error(errno);
-                                        panic!("lstat failed after readdir_r gave no file type for {:?}: {}",
-                                               pathrc, ioerr);
-                                    }
+        // TODO: handle the case where fh is present by calling fstat
+
+        match self.stat_real(&path) {
+            Ok(attr) => {
+                Ok((TTL, attr))
+            },
+            Err(e) => {
+                error!("getattr: {:?}: {}", path, e);
+                Err(e.raw_os_error().unwrap_or(libc::EIO))
+            }
+        }
+    }
+
+    fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
+        debug!("opendir: {:?}", path);
+
+        let real: OsString = self.real_path(&path);
+        debug!("opendir: real = {:?}", real);
+
+        match libc_wrappers::opendir(real) {
+            Ok(fh) => Ok((fh as u64, 0)),
+            Err(e) => Err(e)
+        }
+    }
+
+    fn readdir(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64) -> ResultReaddir {
+        debug!("readdir: {:?} @ {}", path, offset);
+        let mut entries: Vec<DirectoryEntry> = vec![];
+
+        if fh == 0 {
+            error!("readdir: missing fh");
+            return Err(libc::EINVAL);
+        }
+
+        let is_root = path == Path::new("/");
+
+        if offset == 0 {
+            if is_root {
+                entries.push(DirectoryEntry{
+                    name: PathBuf::from(BACKFS_CONTROL_FILE_NAME),
+                    kind: FileType::RegularFile
+                });
+                entries.push(DirectoryEntry{
+                    name: PathBuf::from(BACKFS_VERSION_FILE_NAME),
+                    kind: FileType::RegularFile
+                });
+            }
+        }
+
+        loop {
+            match libc_wrappers::readdir(fh as usize) {
+                Ok(Some(entry)) => {
+                    let name_c = unsafe { CStr::from_ptr(entry.d_name.as_ptr()) };
+                    let name = OsStr::from_bytes(name_c.to_bytes());
+
+                    let entry_path = PathBuf::from(path).join(name);
+
+                    let filetype = match entry.d_type {
+                        libc::DT_DIR => FileType::Directory,
+                        libc::DT_REG => FileType::RegularFile,
+                        libc::DT_LNK => FileType::Symlink,
+                        libc::DT_BLK => FileType::BlockDevice,
+                        libc::DT_CHR => FileType::CharDevice,
+                        libc::DT_FIFO => FileType::NamedPipe,
+                        libc::DT_SOCK => {
+                            warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
+                            FileType::NamedPipe
+                        },
+                        0 | _ => {
+                            let real_path = self.real_path(&entry_path);
+                            match libc_wrappers::lstat(real_path) {
+                                Ok(stat64) => mode_to_filetype(stat64.st_mode),
+                                Err(errno) => {
+                                    let ioerr = io::Error::from_raw_os_error(errno);
+                                    panic!("lstat failed after readdir_r gave no file type for {:?}: {}",
+                                           path, ioerr);
                                 }
-
                             }
-                        };
 
-                        debug!("readdir: adding entry {}: {:?} of type {:?}", inode, name, filetype);
-                        let buffer_full: bool = reply.add(inode, index, filetype, name);
-
-                        if buffer_full {
-                            debug!("readdir: reply buffer is full");
-                            break;
                         }
+                    };
 
-                        index += 1;
-                    },
-                    Ok(None) => { break; },
-                    Err(e) => {
-                        error!("readdir: {:?}: {}", path, e);
-                        reply.error(e);
-                        return;
-                    }
-                }
-            }
-
-            reply.ok();
-        } else {
-            error!("readdir: could not resolve inode {}", ino);
-            reply.error(libc::ENOENT);
-        }
-    }
-
-    fn releasedir(&mut self, _req: &Request, ino: u64, fh: u64, _flags: u32, reply: ReplyEmpty) {
-        if let Some(path) = self.inode_table.get_path(ino) {
-            debug!("releasedir: {:?}", path);
-            match libc_wrappers::closedir(fh as usize) {
-                Ok(()) => { reply.ok(); }
+                    debug!("readdir: adding entry {:?} of type {:?}", name, filetype);
+                    entries.push(DirectoryEntry {
+                        name: PathBuf::from(name),
+                        kind: filetype,
+                    });
+                },
+                Ok(None) => { break; },
                 Err(e) => {
-                    error!("closedir({:?}): {}", path, io::Error::from_raw_os_error(e));
-                    reply.error(e);
+                    error!("readdir: {:?}: {}", path, e);
+                    return Err(e);
                 }
             }
-        } else {
-            error!("releasedir: could not resolve inode {}", ino);
-            reply.error(libc::ENOENT);
+        }
+
+        Ok(entries) 
+    }
+
+    fn releasedir(&self, _req: RequestInfo, path: &Path, fh: u64, _flags: u32) -> ResultEmpty {
+        debug!("releasedir: {:?}", path);
+        match libc_wrappers::closedir(fh as usize) {
+            Ok(()) => { Ok(()) }
+            Err(e) => {
+                error!("closedir({:?}): {}", path, io::Error::from_raw_os_error(e));
+                Err(e)
+            }
         }
     }
 
+    /*
     fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
         if let Some(path) = self.inode_table.get_path(ino) {
             debug!("open: {:?} flags={:#x}", path, flags);
@@ -677,6 +608,7 @@ impl Filesystem for BackFS {
             reply.error(libc::ENOENT);
         }
     }
+    */
 
     // TODO: implement the rest of the syscalls needed
 }

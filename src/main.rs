@@ -32,9 +32,12 @@ use backfs_rs::backfs::{self, BackFS};
 use backfs_rs::arg_parse::{self, BackfsSettings};
 
 extern crate fuse;
+extern crate fuse_mt;
 extern crate libc;
 extern crate log;
 extern crate syslog;
+
+use fuse_mt::FuseMT;
 
 fn redirect_input_to_null() -> io::Result<()> {
     unsafe {
@@ -154,5 +157,5 @@ fn main() {
         panic!("Error redirecting stdin to /dev/null: {}", e);
     }
 
-    fuse::mount(backfs, &mountpoint, &fuse_args.as_deref()[..]);
+    fuse::mount(FuseMT::new(backfs, 1), &mountpoint, &fuse_args.as_deref()[..]);
 }
