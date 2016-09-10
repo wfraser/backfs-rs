@@ -5,11 +5,17 @@ authors = ["William R. Fraser <wfraser@codewise.org>"]
 
 [dependencies]
 daemonize = '0.2'
-fuse = "0.2"
+#fuse = "0.2"   # see below
 libc = "0.2"
 log = "0.3"
 syslog = "3.1"
 time = "0.1"
 walkdir = "0.1"
-fuse_mt = { git = "https://github.com/wfraser/fuse-mt.git" }
-#fuse_mt = { path = "../fuse-mt" }
+
+[dependencies.fuse_mt]
+git = "https://github.com/wfraser/fuse-mt.git"
+
+[dependencies.fuse]
+# see https://github.com/zargony/rust-fuse/pull/72
+git = "https://github.com/wfraser/rust-fuse"
+branch = "xattrs"
