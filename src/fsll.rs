@@ -9,7 +9,6 @@ use std::fmt::Debug;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use libc::*;
 use log;
 
 use link;
