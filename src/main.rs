@@ -31,7 +31,6 @@ extern crate backfs_rs;
 use backfs_rs::backfs::{self, BackFS};
 use backfs_rs::arg_parse::{self, BackfsSettings};
 
-extern crate fuse;
 extern crate fuse_mt;
 extern crate libc;
 extern crate log;
@@ -157,5 +156,5 @@ fn main() {
         panic!("Error redirecting stdin to /dev/null: {}", e);
     }
 
-    fuse::mount(FuseMT::new(backfs, 1), &mountpoint, &fuse_args.as_deref()[..]);
+    fuse_mt::mount(FuseMT::new(backfs, 1), &mountpoint, &fuse_args.as_deref()[..]).unwrap();
 }

@@ -15,7 +15,6 @@ mod utils;
 mod osstrextras;
 
 extern crate daemonize;
-extern crate fuse;
 extern crate fuse_mt;
 extern crate libc;
 extern crate time;

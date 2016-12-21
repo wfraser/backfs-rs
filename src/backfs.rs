@@ -24,7 +24,6 @@ use libc_wrappers;
 use utils;
 
 use daemonize::Daemonize;
-use fuse::*;
 use fuse_mt::*;
 use libc;
 use log;
@@ -306,7 +305,7 @@ impl FilesystemMT for BackFS {
         debug!("destroy");
     }
 
-    fn lookup(&self, _req: RequestInfo, parent_path: &Path, name: &Path) -> ResultEntry {
+    fn lookup(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr) -> ResultEntry {
         // Combine the parent path and the name being looked up.
         let path = PathBuf::from(parent_path).join(name);
         debug!("lookup: {:?}", path);
