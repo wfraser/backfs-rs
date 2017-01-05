@@ -208,12 +208,12 @@ impl BackFS {
         }
     }
 
-    fn backfs_control_file_write(&self, data: &[u8]) -> ResultWrite {
+    fn backfs_control_file_write(&self, data: Vec<u8>) -> ResultWrite {
         // remove a trailing newline if it exists
         let data_trimmed = if data.last() == Some(&0x0A) {
             &data[..data.len() - 1]
         } else {
-            data
+            &data
         };
 
         let first_space = data_trimmed.iter().position(|x| *x == 0x20).unwrap_or(data_trimmed.len());
@@ -532,7 +532,7 @@ impl FilesystemMT for BackFS {
         result
     }
 
-    fn write(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, data: &[u8], _flags: u32) -> ResultWrite {
+    fn write(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
         debug!("write: {:?} {:#x}@{:#x}", path, data.len(), offset);
 
         match path.to_str() {
