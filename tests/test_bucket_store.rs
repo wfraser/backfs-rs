@@ -10,8 +10,8 @@ use std::ops::IndexMut;
 
 extern crate libc;
 
-extern crate backfs_rs;
-use backfs_rs::bucket_store::*;
+extern crate backfs;
+use backfs::bucket_store::*;
 
 pub struct TestBucket {
     pub data: Option<Vec<u8>>,

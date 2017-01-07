@@ -22,3 +22,5 @@ extern crate walkdir;
 
 #[macro_use]
 extern crate log;
+
+pub use backfs::{BackFS, BACKFS_VERSION};

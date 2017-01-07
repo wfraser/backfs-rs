@@ -8,10 +8,10 @@ use std::ffi::OsStr;
 use std::io::{self, Cursor, Write};
 use std::str;
 
-extern crate backfs_rs;
-use backfs_rs::fscache::*;
-use backfs_rs::block_map::*;
-use backfs_rs::bucket_store::*;
+extern crate backfs;
+use backfs::fscache::*;
+use backfs::block_map::*;
+use backfs::bucket_store::*;
 
 mod test_block_map;
 use test_block_map::*;

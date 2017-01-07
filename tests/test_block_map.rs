@@ -9,8 +9,8 @@ use std::io;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::str;
 
-extern crate backfs_rs;
-use backfs_rs::block_map::*;
+extern crate backfs;
+use backfs::block_map::*;
 
 pub struct TestMapData {
     pub mtime: i64,

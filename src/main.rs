@@ -27,9 +27,9 @@ mod log_output;
 mod osstrextras;
 use osstrextras::OsStrExtras;
 
-extern crate backfs_rs;
-use backfs_rs::backfs::{self, BackFS};
-use backfs_rs::arg_parse::{self, BackfsSettings};
+extern crate backfs;
+use backfs::BackFS;
+use backfs::arg_parse::{self, BackfsSettings};
 
 extern crate fuse_mt;
 extern crate libc;

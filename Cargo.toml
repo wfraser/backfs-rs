@@ -1,10 +1,13 @@
 [package]
-name = "backfs-rs"
+name = "backfs"
 version = "0.1.0"
 authors = ["William R. Fraser <wfraser@codewise.org>"]
 
+[[bin]]
+name = "backfs-rs"
+
 [dependencies]
-daemonize = '0.2'
+daemonize = "0.2"
 libc = "0.2"
 log = "0.3"
 syslog = "3.1"
@@ -12,5 +15,6 @@ time = "0.1"
 walkdir = "0.1"
 
 [dependencies.fuse_mt]
-git = "https://github.com/wfraser/fuse-mt.git"
-tag = "v0.1.0"
+#git = "https://github.com/wfraser/fuse-mt.git"
+#tag = "v0.1.2"
+version = "0.1.2"
