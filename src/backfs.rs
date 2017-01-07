@@ -368,8 +368,8 @@ impl FilesystemMT for BackFS {
         }
     }
 
-    fn readdir(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64) -> ResultReaddir {
-        debug!("readdir: {:?} @ {}", path, offset);
+    fn readdir(&self, _req: RequestInfo, path: &Path, fh: u64) -> ResultReaddir {
+        debug!("readdir: {:?}", path);
         let mut entries: Vec<DirectoryEntry> = vec![];
 
         if fh == 0 {
@@ -379,26 +379,24 @@ impl FilesystemMT for BackFS {
 
         let is_root = path == Path::new("/");
 
-        if offset == 0 {
-            if is_root {
-                entries.push(DirectoryEntry{
-                    name: PathBuf::from(BACKFS_CONTROL_FILE_NAME),
-                    kind: FileType::RegularFile
-                });
-                entries.push(DirectoryEntry{
-                    name: PathBuf::from(BACKFS_VERSION_FILE_NAME),
-                    kind: FileType::RegularFile
-                });
-            }
+        if is_root {
+            entries.push(DirectoryEntry{
+                name: OsString::from(BACKFS_CONTROL_FILE_NAME),
+                kind: FileType::RegularFile
+            });
+            entries.push(DirectoryEntry{
+                name: OsString::from(BACKFS_VERSION_FILE_NAME),
+                kind: FileType::RegularFile
+            });
         }
 
         loop {
             match libc_wrappers::readdir(fh as usize) {
                 Ok(Some(entry)) => {
                     let name_c = unsafe { CStr::from_ptr(entry.d_name.as_ptr()) };
-                    let name = OsStr::from_bytes(name_c.to_bytes());
+                    let name = OsStr::from_bytes(name_c.to_bytes()).to_owned();
 
-                    let entry_path = PathBuf::from(path).join(name);
+                    let entry_path = PathBuf::from(path).join(&name);
 
                     let filetype = match entry.d_type {
                         libc::DT_DIR => FileType::Directory,
@@ -427,7 +425,7 @@ impl FilesystemMT for BackFS {
 
                     debug!("readdir: adding entry {:?} of type {:?}", name, filetype);
                     entries.push(DirectoryEntry {
-                        name: PathBuf::from(name),
+                        name: name,
                         kind: filetype,
                     });
                 },

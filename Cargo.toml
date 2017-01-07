@@ -16,5 +16,4 @@ walkdir = "0.1"
 
 [dependencies.fuse_mt]
 #git = "https://github.com/wfraser/fuse-mt.git"
-#tag = "v0.1.2"
-version = "0.1.2"
+version = "0.2.0"
