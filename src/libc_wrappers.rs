@@ -8,7 +8,19 @@ use std::io;
 use std::mem;
 use std::ptr;
 use std::os::unix::ffi::OsStringExt;
-use libc;
+
+mod libc {
+    pub use ::libc::*;
+
+    #[cfg(target_os = "macos")]
+    #[allow(non_camel_case_types)]
+    pub type stat64 = stat;
+
+    #[cfg(target_os = "macos")]
+    pub unsafe fn lstat64(path: *const c_char, stat: *mut stat64) -> c_int {
+        lstat(path, stat)
+    }
+}
 
 pub fn opendir(path: OsString) -> Result<usize, libc::c_int> {
     let path_c = match CString::new(path.into_vec()) {

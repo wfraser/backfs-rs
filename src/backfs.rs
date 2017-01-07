@@ -131,6 +131,34 @@ fn mode_to_filetype(mode: libc::mode_t) -> FileType {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
+    Statfs {
+        blocks: statfs.f_blocks,
+        bfree: statfs.f_bfree,
+        bavail: statfs.f_bavail,
+        files: statfs.f_files,
+        ffree: statfs.f_ffree,
+        bsize: statfs.f_bsize as u32,
+        namelen: 255, // TODO
+        frsize: 0, // TODO
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
+    Statfs {
+        blocks: statfs.f_blocks,
+        bfree: statfs.f_bfree,
+        bavail: statfs.f_bavail,
+        files: statfs.f_files,
+        ffree: statfs.f_ffree,
+        bsize: statfs.f_bsize as u32,
+        namelen: statfs.f_namelen as u32,
+        frsize: statfs.f_frsize as u32,
+    }
+}
+
 impl BackFS {
     pub fn new(settings: BackfsSettings) -> BackFS {
         let max_bytes = if settings.cache_size == 0 {
@@ -564,6 +592,25 @@ impl FilesystemMT for BackFS {
                 error!("readlink({:?}): {}", real_path, e);
                 Err(e.raw_os_error().unwrap())
             }
+        }
+    }
+
+    fn statfs(&self, _req: RequestInfo, path: &Path) -> ResultStatfs {
+        debug!("statfs: {:?}", path);
+
+        let real = self.real_path(&path);
+        let mut buf: libc::statfs = unsafe { ::std::mem::zeroed() };
+        let result = unsafe {
+            let path_c = CString::from_vec_unchecked(real.into_vec());
+            libc::statfs(path_c.as_ptr(), &mut buf)
+        };
+
+        if -1 == result {
+            let e = io::Error::last_os_error();
+            error!("statfs({:?}): {}", path, e);
+            Err(e.raw_os_error().unwrap())
+        } else {
+            Ok(statfs_to_fuse(buf))
         }
     }
 
