@@ -3,7 +3,7 @@ name = "backfs"
 version = "0.1.0"
 dependencies = [
  "daemonize 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "fuse_mt 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fuse_mt 0.2.1 (git+https://github.com/wfraser/fuse-mt.git)",
  "libc 0.2.19 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "syslog 3.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -39,7 +39,7 @@ dependencies = [
 [[package]]
 name = "fuse_mt"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/wfraser/fuse-mt.git#f2b11143ec4f867cd1ece64a47edf43e0a33ffec"
 dependencies = [
  "fuse 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.19 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -135,7 +135,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum cfg-if 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "de1e760d7b6535af4241fca8bd8adf68e2e7edacc6b29f5d399050c5e48cf88c"
 "checksum daemonize 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "0239832c1b4ca406d5ec73728cf4c7336d25cf85dd32db9e047e9e706ee0e935"
 "checksum fuse 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "5087262ce5b36fed6ccd4abf0a8224e48d055a2bb07fecb5605765de6f114a28"
-"checksum fuse_mt 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "1e4f7a366a9355c7accbae22dff0eed9273719afca1ebdde336218410a94e35f"
+"checksum fuse_mt 0.2.1 (git+https://github.com/wfraser/fuse-mt.git)" = "<none>"
 "checksum kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "7507624b29483431c0ba2d82aece8ca6cdba9382bff4ddd0f7490560c056098d"
 "checksum libc 0.2.19 (registry+https://github.com/rust-lang/crates.io-index)" = "9e030dc72013ed68994d1b2cbf36a94dd0e58418ba949c4b0db7eeb70a7a6352"
 "checksum log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)" = "ab83497bf8bf4ed2a74259c1c802351fcd67a65baa86394b6ba73c36f4838054"

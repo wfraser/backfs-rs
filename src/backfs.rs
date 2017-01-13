@@ -29,8 +29,6 @@ use libc;
 use log;
 use time::Timespec;
 
-pub const BACKFS_VERSION: &'static str = "BackFS version: 0.1.0\n";
-
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
 const BACKFS_CONTROL_FILE_NAME: &'static str = ".backfs_control";
@@ -85,6 +83,16 @@ macro_rules! debug {
     ($($arg:tt)+) => (log2!(log::LogLevel::Debug, $($arg)+));
 }
 
+fn is_backfs_fake_file(path: &Path) -> bool {
+    path == Path::new(BACKFS_CONTROL_FILE_PATH)
+        || path == Path::new(BACKFS_VERSION_FILE_PATH)
+}
+
+fn backfs_version_str() -> String {
+    format!("BackFS version: {} {}\nFuseMT version: {}\n",
+            super::VERSION, super::GIT_REVISION, ::fuse_mt::VERSION)
+}
+
 fn backfs_fake_file_attr(path: Option<&str>) -> Option<FileAttr> {
     match path {
         Some(BACKFS_CONTROL_FILE_PATH) => {
@@ -96,7 +104,7 @@ fn backfs_fake_file_attr(path: Option<&str>) -> Option<FileAttr> {
         Some(BACKFS_VERSION_FILE_PATH) => {
             let mut attr = BACKFS_FAKE_FILE_ATTRS.clone();
             attr.perm = 0o444; // -r--r--r--
-            attr.size = BACKFS_VERSION.as_bytes().len() as u64;
+            attr.size = backfs_version_str().as_bytes().len() as u64;
             Some(attr)
         },
         _ => None
@@ -504,6 +512,11 @@ impl FilesystemMT for BackFS {
     fn release(&self, _req: RequestInfo, path: &Path, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool) -> ResultEmpty {
         debug!("release: {:?}", path);
 
+        if is_backfs_fake_file(path) {
+            // we didn't open any real file
+            return Ok(());
+        }
+
         match libc_wrappers::close(fh as usize) {
             Ok(()) => { Ok(()) },
             Err(e) => {
@@ -516,19 +529,23 @@ impl FilesystemMT for BackFS {
     fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
         debug!("read: {:?} {:#x} @ {:#x}", path, size, offset);
 
-        let fake_data: Option<&[u8]> = match path.to_str() {
-            Some(BACKFS_CONTROL_FILE_PATH) => Some(BACKFS_CONTROL_FILE_HELP.as_bytes()),
-            Some(BACKFS_VERSION_FILE_PATH) => Some(BACKFS_VERSION.as_bytes()),
+        let fake_data: Option<Vec<u8>> = match path.to_str() {
+            Some(BACKFS_CONTROL_FILE_PATH) => Some(BACKFS_CONTROL_FILE_HELP.bytes().collect()),
+            Some(BACKFS_VERSION_FILE_PATH) => Some(backfs_version_str().bytes().collect()),
             _ => None
         };
 
-        if let Some(data) = fake_data {
+        if let Some(mut data) = fake_data {
             if offset as usize >= data.len() {
                 // Request out of range; return empty result.
                 return Ok(vec![]);
             } else {
-                let end = cmp::min(data.len(), (offset as usize + size as usize));
-                return Ok(Vec::from(&data[offset as usize .. end]));
+                let offset = offset as usize;
+                let size = size as usize;
+                let end = cmp::min(data.len(), offset + size);
+                data = data.split_off(offset);
+                data.truncate(end - offset);
+                return Ok(data);
             }
         }
 

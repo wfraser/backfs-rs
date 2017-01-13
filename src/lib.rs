@@ -23,4 +23,10 @@ extern crate walkdir;
 #[macro_use]
 extern crate log;
 
-pub use backfs::{BackFS, BACKFS_VERSION};
+// This env variable is set by Cargo
+pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
+// This file is produced by build.rs
+pub const GIT_REVISION: &'static str = include_str!(concat!(env!("OUT_DIR"), "/git_rev.txt"));
+
+pub use backfs::BackFS;

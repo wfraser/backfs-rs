@@ -68,7 +68,8 @@ fn main() {
         }
 
         if settings.version {
-            print!("{}", backfs::BACKFS_VERSION);
+            print!("BackFS version: {} {}\nFuseMT version: {}\n",
+                   backfs::VERSION, backfs::GIT_REVISION, fuse_mt::VERSION);
             settings.fuse_options.push(OsString::from("--version"));
             settings.mount_point = OsString::from(".");  // placate the mount call
             settings.backing_fs = OsString::from(".");

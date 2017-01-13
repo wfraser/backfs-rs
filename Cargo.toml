@@ -2,6 +2,7 @@
 name = "backfs"
 version = "0.1.0"
 authors = ["William R. Fraser <wfraser@codewise.org>"]
+build = "build.rs"
 
 [[bin]]
 name = "backfs-rs"
@@ -15,5 +16,5 @@ time = "0.1"
 walkdir = "0.1"
 
 [dependencies.fuse_mt]
-#git = "https://github.com/wfraser/fuse-mt.git"
-version = "0.2"
+git = "https://github.com/wfraser/fuse-mt.git"
+#version = "0.2"
