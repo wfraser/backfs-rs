@@ -531,7 +531,7 @@ impl FilesystemMT for BackFS {
 
         let fake_data: Option<Vec<u8>> = match path.to_str() {
             Some(BACKFS_CONTROL_FILE_PATH) => Some(BACKFS_CONTROL_FILE_HELP.bytes().collect()),
-            Some(BACKFS_VERSION_FILE_PATH) => Some(backfs_version_str().bytes().collect()),
+            Some(BACKFS_VERSION_FILE_PATH) => Some(backfs_version_str().into_bytes()),
             _ => None
         };
 
