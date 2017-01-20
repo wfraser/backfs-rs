@@ -4,7 +4,7 @@
 //
 
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::mem;
@@ -60,20 +60,27 @@ fn main() {
     }
 
     if settings.help || settings.version {
+        let mut options = Vec::<&OsStr>::new();
+
         if settings.help {
             println!("{}\nFUSE options:", arg_parse::USAGE);
-            settings.fuse_options.push(OsString::from("--help"));
-            settings.mount_point = OsString::from(".");  // placate the mount call
-            settings.backing_fs = OsString::from(".");
-        }
-
-        if settings.version {
+            options.push(&OsStr::new("--help"));
+        } else if settings.version {
             print!("BackFS version: {} {}\nFuseMT version: {}\n",
                    backfs::VERSION, backfs::GIT_REVISION, fuse_mt::VERSION);
-            settings.fuse_options.push(OsString::from("--version"));
-            settings.mount_point = OsString::from(".");  // placate the mount call
-            settings.backing_fs = OsString::from(".");
+            options.push(&OsStr::new("--version"));
         }
+
+        if let Err(e) = redirect_input_to_null() {
+            panic!("Error redirecting stdin to /dev/null: {}", e);
+        }
+
+        struct DummyFS;
+        impl fuse_mt::FilesystemMT for DummyFS {
+        }
+
+        fuse_mt::mount(fuse_mt::FuseMT::new(DummyFS, 1), &OsStr::new("."), &options).unwrap();
+        process::exit(0);
     } else {
         if settings.cache_size != 0 && settings.cache_size < settings.block_size {
             println!("Invalid options: the max cache size cannot be less than the block size.");

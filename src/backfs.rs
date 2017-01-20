@@ -473,7 +473,7 @@ impl FilesystemMT for BackFS {
             }
         }
 
-        Ok(entries) 
+        Ok(entries)
     }
 
     fn releasedir(&self, _req: RequestInfo, path: &Path, fh: u64, _flags: u32) -> ResultEmpty {
