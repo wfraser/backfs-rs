@@ -9,7 +9,7 @@ use std::fs;
 use std::io;
 use std::mem;
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 trait VecDeref<T: Deref> {
@@ -36,7 +36,7 @@ extern crate libc;
 extern crate log;
 extern crate syslog;
 
-use fuse_mt::FuseMT;
+use fuse_mt::{FuseMT, FilesystemMT};
 
 fn redirect_input_to_null() -> io::Result<()> {
     unsafe {
@@ -49,6 +49,17 @@ fn redirect_input_to_null() -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn mount_and_exit<FS, P>(fs: FS, num_threads: usize, path: &P, options: &[&OsStr]) -> !
+        where FS: FilesystemMT + Sync + Send + 'static,
+              P: AsRef<Path> {
+    if let Err(e) = redirect_input_to_null() {
+        panic!("Error redirecting stdin to /dev/null: {}", e);
+    }
+
+    fuse_mt::mount(FuseMT::new(fs, num_threads), path, options).unwrap();
+    process::exit(0);
 }
 
 fn main() {
@@ -71,16 +82,11 @@ fn main() {
             options.push(&OsStr::new("--version"));
         }
 
-        if let Err(e) = redirect_input_to_null() {
-            panic!("Error redirecting stdin to /dev/null: {}", e);
-        }
-
         struct DummyFS;
         impl fuse_mt::FilesystemMT for DummyFS {
         }
 
-        fuse_mt::mount(fuse_mt::FuseMT::new(DummyFS, 1), &OsStr::new("."), &options).unwrap();
-        process::exit(0);
+        mount_and_exit(DummyFS, 1, &Path::new("."), &options);
     } else {
         if settings.cache_size != 0 && settings.cache_size < settings.block_size {
             println!("Invalid options: the max cache size cannot be less than the block size.");
@@ -160,9 +166,5 @@ fn main() {
     let mountpoint = PathBuf::from(&settings.mount_point);
     let backfs = BackFS::new(settings);
 
-    if let Err(e) = redirect_input_to_null() {
-        panic!("Error redirecting stdin to /dev/null: {}", e);
-    }
-
-    fuse_mt::mount(FuseMT::new(backfs, 1), &mountpoint, &fuse_args.as_deref()[..]).unwrap();
+    mount_and_exit(backfs, 1, &mountpoint, &fuse_args.as_deref()[..]);
 }
