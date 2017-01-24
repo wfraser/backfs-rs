@@ -12,6 +12,7 @@ use fuse_mt::{FuseMT, FilesystemMT};
 
 extern crate libc;
 extern crate log;
+extern crate log_panics;
 extern crate syslog;
 
 mod log_output;
@@ -137,8 +138,7 @@ fn main() {
         if !settings.foreground {
             // If we're forking to the background, we need to make sure any panics get sent to
             // syslog as well, or we'll never see them.
-            // Unfortunately, this is gated on rust nightly for now.
-            //log::log_panics();
+            log_panics::init();
         }
     }
 
