@@ -3,6 +3,22 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
+extern crate backfs;
+use backfs::BackFS;
+use backfs::arg_parse::{self, BackfsSettings};
+
+extern crate fuse_mt;
+use fuse_mt::{FuseMT, FilesystemMT};
+
+extern crate libc;
+extern crate log;
+extern crate syslog;
+
+mod log_output;
+
+mod osstrextras;
+use osstrextras::OsStrExtras;
+
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -21,22 +37,6 @@ impl<T: Deref> VecDeref<T> for Vec<T> {
         self.iter().map(Deref::deref).collect()
     }
 }
-
-mod log_output;
-
-mod osstrextras;
-use osstrextras::OsStrExtras;
-
-extern crate backfs;
-use backfs::BackFS;
-use backfs::arg_parse::{self, BackfsSettings};
-
-extern crate fuse_mt;
-extern crate libc;
-extern crate log;
-extern crate syslog;
-
-use fuse_mt::{FuseMT, FilesystemMT};
 
 fn redirect_input_to_null() -> io::Result<()> {
     unsafe {

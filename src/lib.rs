@@ -3,6 +3,13 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
+extern crate daemonize;
+extern crate fuse_mt;
+extern crate libc;
+#[macro_use] extern crate log;
+extern crate time;
+extern crate walkdir;
+
 pub mod arg_parse;
 pub mod backfs;
 pub mod bucket_store;
@@ -13,15 +20,6 @@ mod libc_wrappers;
 mod link;
 mod utils;
 mod osstrextras;
-
-extern crate daemonize;
-extern crate fuse_mt;
-extern crate libc;
-extern crate time;
-extern crate walkdir;
-
-#[macro_use]
-extern crate log;
 
 // This env variable is set by Cargo
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
