@@ -24,7 +24,8 @@ mod osstrextras;
 // This env variable is set by Cargo
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-// This file is produced by build.rs
+// These files are produced by build.rs
 pub const GIT_REVISION: &'static str = include_str!(concat!(env!("OUT_DIR"), "/git_rev.txt"));
+pub const BUILD_TIME: i64 = include!(concat!(env!("OUT_DIR"), "/build_time.txt"));
 
 pub use backfs::BackFS;

@@ -7,6 +7,9 @@ build = "build.rs"
 [[bin]]
 name = "backfs-rs"
 
+[build-dependencies]
+time = "0.1"
+
 [dependencies]
 daemonize = "0.2"
 libc = "0.2"
