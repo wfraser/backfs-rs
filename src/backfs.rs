@@ -348,14 +348,14 @@ impl FilesystemMT for BackFS {
 
         match backfs_fake_file_attr(path.to_str()) {
             Some(attr) => {
-                return Ok((TTL, attr, 0));
+                return Ok((TTL, attr));
             }
             None => ()
         }
 
         match self.stat_real(&path) {
             Ok(attr) => {
-                Ok((TTL, attr, 0))
+                Ok((TTL, attr))
             }
             Err(e) => {
                 let msg = format!("lookup: {:?}: {}", path, e);
