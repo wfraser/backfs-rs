@@ -135,4 +135,14 @@ impl CacheBucketStore for TestBucketStore {
         }
         Ok(())
     }
+
+    fn get_size(&self, bucket_path: &OsStr) -> io::Result<u64> {
+        let number = parse_path(bucket_path);
+        let bucket_result: io::Result<&TestBucket> = self.buckets
+            .get(number)
+            .ok_or(io::Error::new(io::ErrorKind::NotFound, "bucket not found"));
+        try!(bucket_result).data
+            .as_ref()
+            .map_or(Ok(0), |data| Ok(data.len() as u64))
+    }
 }

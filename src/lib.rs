@@ -16,10 +16,10 @@ pub mod bucket_store;
 pub mod block_map;
 pub mod fscache;
 pub mod fsll;
+pub mod osstrextras; // useful for test code
 mod libc_wrappers;
 mod link;
 mod utils;
-mod osstrextras;
 
 // This env variable is set by Cargo
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");

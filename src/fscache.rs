@@ -76,6 +76,7 @@ pub trait Cache {
     fn fetch<F>(&self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
         -> io::Result<Vec<u8>>
         where F: Read + Seek;
+    fn count_cached_bytes(&self, path: &OsStr) -> u64;
 }
 
 impl<M, S, X1, X2> FSCache<M, S, X1, X2>
@@ -343,5 +344,19 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
         } // for block
 
         Ok(result)
+    }
+
+    fn count_cached_bytes(&self, path: &OsStr) -> u64 {
+        let mut sum = 0;
+        let map = self.map.read().unwrap();
+        let store = self.store.read().unwrap();
+        if let Err(e) = (*map).borrow().for_each_block_under_path(path, |block_path| {
+            sum += try!((*store).borrow().get_size(block_path));
+            Ok(())
+        }) {
+            error!("failed to count cached bytes under {:?}: {}", path, e);
+            return 0;
+        }
+        sum
     }
 }

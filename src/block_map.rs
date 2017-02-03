@@ -75,6 +75,8 @@ pub trait CacheBlockMap {
         where F: FnMut(&OsStr) -> io::Result<()>;
     fn unmap_block(&mut self, block_path: &OsStr) -> io::Result<()>;
     fn is_block_mapped(&self, block_path: &OsStr) -> io::Result<bool>;
+    fn for_each_block_under_path<F>(&self, path: &OsStr, handler: F) -> io::Result<()>
+        where F: FnMut(&OsStr) -> io::Result<()>;
 }
 
 pub struct FSCacheBlockMap {
@@ -100,44 +102,6 @@ impl FSCacheBlockMap {
 
         map_path.push(relative_path);
         map_path
-    }
-
-    fn enumerate_blocks_of_path<F>(&self, map_path: &Path, mut f: F) -> io::Result<()>
-            where F: FnMut(&OsStr) -> io::Result<()> {
-        for entry_result in WalkDir::new(map_path) {
-            match entry_result {
-                Ok(entry) => {
-                    let entry_path = entry.path();
-                    if entry.file_type().is_symlink() {
-                        let bucket_path = match link::getlink("", entry_path) {
-                            Ok(Some(path)) => path,
-                            Err(e) => {
-                                error!("enumerate_blocks_of_path: error reading link {:?}: {}",
-                                     entry.path(), e);
-                                continue;
-                            },
-                            Ok(None) => unreachable!()
-                        };
-
-                        trylog!(f(bucket_path.as_os_str()),
-                                "enumerate_blocks_of_path: callback returned error");
-                    }
-                },
-                Err(e) => {
-                    let is_start = e.path() == Some(map_path);
-                    let ioerr = io::Error::from(e);
-                    if is_start && ioerr.raw_os_error() == Some(libc::ENOENT) {
-                        // If the map directory doesn't exist, there's nothing to do.
-                        return Ok(())
-                    } else {
-                        error!("enumerate_blocks_of_path: error reading directory entry from {:?}: {}",
-                               map_path, ioerr);
-                        return Err(ioerr)
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 
 }
@@ -197,8 +161,8 @@ impl CacheBlockMap for FSCacheBlockMap {
 
     fn invalidate_path<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
             where F: FnMut(&OsStr) -> io::Result<()> {
-        let map_path: PathBuf = self.map_path(path);
-        try!(self.enumerate_blocks_of_path(&map_path, f));
+        try!(self.for_each_block_under_path(path, f));
+        let map_path = self.map_path(path);
         trylog!(fs::remove_dir_all(&map_path),
                 "Error removing map path {:?}", map_path);
         Ok(())
@@ -219,5 +183,44 @@ impl CacheBlockMap for FSCacheBlockMap {
         let bucket_path = trylog!(link::getlink("", block_path),
                                   "is_block_mapped: error reading link {:?}", block_path);
         Ok(bucket_path.is_some())
+    }
+
+    fn for_each_block_under_path<F>(&self, path: &OsStr, mut f: F) -> io::Result<()>
+            where F: FnMut(&OsStr) -> io::Result<()> {
+        let map_path: PathBuf = self.map_path(path);
+        for entry_result in WalkDir::new(&map_path) {
+            match entry_result {
+                Ok(entry) => {
+                    let entry_path = entry.path();
+                    if entry.file_type().is_symlink() {
+                        let bucket_path = match link::getlink("", entry_path) {
+                            Ok(Some(path)) => path,
+                            Err(e) => {
+                                error!("for_each_block_under_path: error reading link {:?}: {}",
+                                     entry.path(), e);
+                                continue;
+                            },
+                            Ok(None) => unreachable!()
+                        };
+
+                        trylog!(f(bucket_path.as_os_str()),
+                                "for_each_block_under_path: callback returned error");
+                    }
+                },
+                Err(e) => {
+                    let is_start = e.path() == Some(&map_path);
+                    let ioerr = io::Error::from(e);
+                    if is_start && ioerr.raw_os_error() == Some(libc::ENOENT) {
+                        // If the map directory doesn't exist, there's nothing to do.
+                        return Ok(())
+                    } else {
+                        error!("for_each_block_under_path: error reading directory entry from {:?}: {}",
+                               map_path, ioerr);
+                        return Err(ioerr)
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }

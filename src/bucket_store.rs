@@ -28,6 +28,7 @@ pub trait CacheBucketStore {
     fn enumerate_buckets<F>(&self, handler: F) -> io::Result<()>
         where F: FnMut(/* bucket path */ &OsStr,
                        /* parent path */ Option<&OsStr>) -> io::Result<()>;
+    fn get_size(&self, bucket_path: &OsStr) -> io::Result<u64>;
 }
 
 pub struct FSCacheBucketStore<LL: PathLinkedList> {
@@ -389,5 +390,11 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
         }));
 
         Ok(())
+    }
+
+    fn get_size(&self, bucket_path: &OsStr) -> io::Result<u64> {
+        let data_path = PathBuf::from(bucket_path).join("data");
+        let metadata = try!(fs::metadata(&data_path));
+        Ok(metadata.len())
     }
 }

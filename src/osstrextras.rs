@@ -59,9 +59,31 @@ impl<'a> Iterator for SplitN<'a> {
     }
 }
 
+pub trait AsBytes {
+    fn as_bytes_ext(&self) -> &[u8];
+}
+
+impl<'a> AsBytes for &'a str {
+    fn as_bytes_ext(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+impl AsBytes for OsStr {
+    fn as_bytes_ext(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+impl AsBytes for OsString {
+    fn as_bytes_ext(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
 pub trait OsStrExtras {
     fn is_empty(&self) -> bool;
-    fn starts_with(&self, s: &str) -> bool;
+    fn starts_with(&self, s: &AsBytes) -> bool;
     fn split<'a>(&'a self, pat: u8) -> Split<'a>;
     fn splitn<'a>(&'a self, count: usize, pat: u8) -> SplitN<'a>;
 }
@@ -71,8 +93,8 @@ impl OsStrExtras for OsString {
         self.as_os_str() == OsStr::new("")
     }
 
-    fn starts_with(&self, s: &str) -> bool {
-        self.as_bytes().starts_with(s.as_bytes())
+    fn starts_with(&self, s: &AsBytes) -> bool {
+        self.as_bytes().starts_with(s.as_bytes_ext())
     }
 
     fn split<'a>(&'a self, pat: u8) -> Split<'a> {
@@ -101,8 +123,8 @@ impl OsStrExtras for OsStr {
         self == OsStr::new("")
     }
 
-    fn starts_with(&self, s: &str) -> bool {
-        self.as_bytes().starts_with(s.as_bytes())
+    fn starts_with(&self, s: &AsBytes) -> bool {
+        self.as_bytes().starts_with(s.as_bytes_ext())
     }
 
     fn split<'a>(&'a self, pat: u8) -> Split<'a> {

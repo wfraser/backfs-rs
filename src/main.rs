@@ -147,7 +147,7 @@ fn main() {
         let mut fuse_options = OsString::new();
 
         for option in settings.fuse_options.iter() {
-            if option.starts_with("-") {
+            if option.starts_with(&"-") {
                 fuse_args.push(OsString::from(option));
             } else {
                 if !fuse_options.is_empty() {

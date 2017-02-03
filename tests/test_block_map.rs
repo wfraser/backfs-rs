@@ -11,6 +11,7 @@ use std::str;
 
 extern crate backfs;
 use backfs::block_map::*;
+use backfs::osstrextras::OsStrExtras;
 
 pub struct TestMapData {
     pub mtime: i64,
@@ -112,5 +113,20 @@ impl CacheBlockMap for TestMap {
             Some(file_entry) => file_entry.blocks.contains_key(&block),
             None => false
         })
+    }
+
+    fn for_each_block_under_path<F>(&self, path: &OsStr, mut handler: F) -> io::Result<()>
+            where F: FnMut(&OsStr) -> io::Result<()> {
+        let mut check_path = path.to_owned();
+        check_path.push("/");
+        for (cached_path, map_data) in self.map.iter() {
+            if cached_path == path || cached_path.starts_with(&check_path) {
+                for block in map_data.blocks.keys() {
+                    let block_path = self.get_block_path(cached_path, *block);
+                    try!(handler(&block_path));
+                }
+            }
+        }
+        Ok(())
     }
 }

@@ -9,6 +9,19 @@ use std::mem;
 use std::ptr;
 use std::os::unix::ffi::OsStringExt;
 
+macro_rules! into_cstring {
+    ($path:expr, $syscall:expr) => {
+        match CString::new($path.into_vec()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!(concat!($syscall, ": path {:?} contains interior NUL byte"),
+                       OsString::from_vec(e.into_vec()));
+                return Err(libc::EINVAL);
+            }
+        }
+    }
+}
+
 mod libc {
     pub use ::libc::*;
 
@@ -20,17 +33,23 @@ mod libc {
     pub unsafe fn lstat64(path: *const c_char, stat: *mut stat64) -> c_int {
         lstat(path, stat)
     }
+
+    #[cfg(target_os = "macos")]
+    pub const XATTR_NOFOLLOW: c_int = 1;
+
+    #[cfg(target_os = "macos")]
+    pub unsafe fn llistxattr(path: *const c_char, namebuf: *mut c_char, size: size_t) -> ssize_t {
+        listxattr(path, namebuf, size, XATTR_NOFOLLOW)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub unsafe fn lgetxattr(path: *const c_char, name: *const c_char, value: *mut c_void, size: size_t) -> ssize_t {
+        getxattr(path, name, value, size, 0, XATTR_NOFOLLOW)
+    }
 }
 
 pub fn opendir(path: OsString) -> Result<usize, libc::c_int> {
-    let path_c = match CString::new(path.into_vec()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("opendir: path {:?} contains interior NUL byte",
-                   OsString::from_vec(e.into_vec()));
-            return Err(libc::EINVAL);
-        }
-    };
+    let path_c = into_cstring!(path, "opendir");
 
     let dir: *mut libc::DIR = unsafe { libc::opendir(mem::transmute(path_c.as_ptr())) };
     if dir.is_null() {
@@ -67,14 +86,7 @@ pub fn closedir(fh: usize) -> Result<(), libc::c_int> {
 }
 
 pub fn open(path: OsString, flags: libc::c_int) -> Result<usize, libc::c_int> {
-    let path_c = match CString::new(path.into_vec()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("open: path {:?} contains interior NUL byte",
-                   OsString::from_vec(e.into_vec()));
-            return Err(libc::EINVAL);
-        }
-    };
+    let path_c = into_cstring!(path, "open");
 
     let fd: libc::c_int = unsafe { libc::open(mem::transmute(path_c.as_ptr()), flags) };
     if fd == -1 {
@@ -94,14 +106,7 @@ pub fn close(fh: usize) -> Result<(), libc::c_int> {
 }
 
 pub fn lstat(path: OsString) -> Result<libc::stat64, libc::c_int> {
-    let path_c = match CString::new(path.into_vec()) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("lstat: path {:?} contains interior NUL byte",
-                   OsString::from_vec(e.into_vec()));
-            return Err(libc::EINVAL);
-        }
-    };
+    let path_c = into_cstring!(path, "lstat");
 
     let mut buf: libc::stat64 = unsafe { mem::zeroed() };
     if -1 == unsafe { libc::lstat64(mem::transmute(path_c.as_ptr()), &mut buf) } {
@@ -109,4 +114,30 @@ pub fn lstat(path: OsString) -> Result<libc::stat64, libc::c_int> {
     }
 
     Ok(buf)
+}
+
+pub fn llistxattr(path: OsString, buf: &mut [u8]) -> Result<usize, libc::c_int> {
+    let path_c = into_cstring!(path, "llistxattr");
+
+    let result = unsafe {
+        libc::llistxattr(path_c.as_ptr(), mem::transmute(buf.as_mut_ptr()), buf.len())
+    };
+    match result {
+        -1 => Err(io::Error::last_os_error().raw_os_error().unwrap()),
+        nbytes => Ok(nbytes as usize),
+    }
+}
+
+pub fn lgetxattr(path: OsString, name: OsString, buf: &mut [u8]) -> Result<usize, libc::c_int> {
+    let path_c = into_cstring!(path, "lgetxattr");
+    let name_c = into_cstring!(name, "lgetxattr");
+
+    let result = unsafe {
+        libc::lgetxattr(path_c.as_ptr(), name_c.as_ptr(), mem::transmute(buf.as_mut_ptr()),
+                        buf.len())
+    };
+    match result {
+        -1 => Err(io::Error::last_os_error().raw_os_error().unwrap()),
+        nbytes => Ok(nbytes as usize),
+    }
 }

@@ -631,5 +631,55 @@ impl FilesystemMT for BackFS {
         }
     }
 
+    fn listxattr(&self, _req: RequestInfo, path: &Path, size: u32) -> ResultXattr {
+        debug!("listxattr: {:?}", path);
+
+        let extra = b"user.backfs.in_cache\0";
+
+        let real = self.real_path(&path);
+        if size == 0 {
+            let mut nbytes = libc_wrappers::llistxattr(real, &mut[]).unwrap_or(0);
+            nbytes += extra.len();
+            Ok(Xattr::Size(nbytes as u32))
+        } else {
+            let mut data = Vec::<u8>::with_capacity(size as usize);
+            data.extend_from_slice(extra);
+            unsafe { data.set_len(size as usize) };
+            let nread = libc_wrappers::llistxattr(real, &mut data.as_mut_slice()[extra.len()..])
+                .unwrap_or(0);
+            data.truncate(nread + extra.len());
+            Ok(Xattr::Data(data))
+        }
+    }
+
+    fn getxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, size: u32) -> ResultXattr {
+        debug!("getxattr: {:?} {:?} {}", path, name, size);
+
+        let extra = OsStr::new("user.backfs.in_cache");
+
+        let real = self.real_path(&path);
+        if size == 0 {
+            if name == extra {
+                Ok(Xattr::Size(21)) // number of digits in 2^64, plus null byte
+            } else {
+                let nbytes = try!(libc_wrappers::lgetxattr(real, name.to_owned(), &mut[]));
+                Ok(Xattr::Size(nbytes as u32))
+            }
+        } else {
+            if name == extra {
+                let nbytes = self.fscache.count_cached_bytes(path.as_os_str());
+                let mut data = format!("{}", nbytes).into_bytes();
+                data.truncate(size as usize);
+                Ok(Xattr::Data(data))
+            } else {
+                let mut data = Vec::<u8>::with_capacity(size as usize);
+                unsafe { data.set_len(size as usize) };
+                let nread = try!(libc_wrappers::lgetxattr(real, name.to_owned(), data.as_mut_slice()));
+                data.truncate(nread);
+                Ok(Xattr::Data(data))
+            }
+        }
+    }
+
     // TODO: implement the rest of the syscalls needed
 }
