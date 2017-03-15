@@ -44,6 +44,7 @@ pub fn init(global_filter: log::LogLevelFilter,
 }
 
 fn loglevel_to_syslog_severity(level: LogLevel) -> Severity {
+    #[allow(match_same_arms)]
     match level {
         LogLevel::Error => Severity::LOG_ERR,
         LogLevel::Warn  => Severity::LOG_WARNING,
@@ -60,10 +61,8 @@ impl log::Log for Log {
         }
 
         for &(ref target, ref filter) in &self.target_filter {
-            if metadata.target() == target {
-                if *filter < metadata.level() {
-                    return false;
-                }
+            if metadata.target() == target && *filter < metadata.level() {
+                return false;
             }
         }
 

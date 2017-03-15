@@ -96,13 +96,13 @@ fn backfs_version_str() -> String {
 fn backfs_fake_file_attr(path: Option<&str>) -> Option<FileAttr> {
     match path {
         Some(BACKFS_CONTROL_FILE_PATH) => {
-            let mut attr = BACKFS_FAKE_FILE_ATTRS.clone();
+            let mut attr = BACKFS_FAKE_FILE_ATTRS;
             attr.perm = 0o600; // -rw-------
             attr.size = BACKFS_CONTROL_FILE_HELP.as_bytes().len() as u64;
             Some(attr)
         },
         Some(BACKFS_VERSION_FILE_PATH) => {
-            let mut attr = BACKFS_FAKE_FILE_ATTRS.clone();
+            let mut attr = BACKFS_FAKE_FILE_ATTRS;
             attr.perm = 0o444; // -r--r--r--
             attr.size = backfs_version_str().as_bytes().len() as u64;
             Some(attr)
@@ -252,7 +252,8 @@ impl BackFS {
             &data
         };
 
-        let first_space = data_trimmed.iter().position(|x| *x == 0x20).unwrap_or(data_trimmed.len());
+        let first_space = data_trimmed.iter().position(|x| *x == 0x20)
+                .unwrap_or_else(|| data_trimmed.len());
         let (command_bytes, arg_bytes) = data_trimmed.split_at(first_space);
         let command = str::from_utf8(command_bytes).unwrap_or("[invalid utf8]");
 
@@ -293,7 +294,7 @@ impl BackFS {
                 let path_bytes = Vec::from(self.settings.cache.as_os_str().as_bytes());
                 let path_c = CString::from_vec_unchecked(path_bytes);
                 let mut statbuf: libc::statvfs = mem::zeroed();
-                if -1 == libc::statvfs(path_c.into_raw(), mem::transmute(&mut statbuf )) {
+                if -1 == libc::statvfs(path_c.into_raw(), &mut statbuf as *mut libc::statvfs) {
                     let e = io::Error::last_os_error();
                     println!("Error: failed to statvfs on the cache filesystem: {}", e);
                     return Err(e);
@@ -346,11 +347,8 @@ impl FilesystemMT for BackFS {
         let path = PathBuf::from(parent_path).join(name);
         debug!("lookup: {:?}", path);
 
-        match backfs_fake_file_attr(path.to_str()) {
-            Some(attr) => {
-                return Ok((TTL, attr));
-            }
-            None => ()
+        if let Some(attr) = backfs_fake_file_attr(path.to_str()) {
+            return Ok((TTL, attr));
         }
 
         match self.stat_real(&path) {
@@ -372,11 +370,8 @@ impl FilesystemMT for BackFS {
     fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultGetattr {
         debug!("getattr: {:?}", path);
 
-        match backfs_fake_file_attr(path.to_str()) {
-            Some(attr) => {
-                return Ok((TTL, attr));
-            }
-            None => ()
+        if let Some(attr) = backfs_fake_file_attr(path.to_str()) {
+            return Ok((TTL, attr));
         }
 
         // TODO: handle the case where fh is present by calling fstat
@@ -490,12 +485,10 @@ impl FilesystemMT for BackFS {
     fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
         debug!("open: {:?} flags={:#x}", path, flags);
 
-        if match path.to_str() {
-            Some(BACKFS_CONTROL_FILE_PATH) => true,
-            Some(BACKFS_VERSION_FILE_PATH) => true,
-            _ => false
-        } {
-            return Ok((0, flags));
+        if let Some(path) = path.to_str() {
+            if path == BACKFS_CONTROL_FILE_PATH || path == BACKFS_VERSION_FILE_PATH {
+                return Ok((0, flags));
+            }
         }
 
         let real_path = self.real_path(&path);
@@ -665,19 +658,17 @@ impl FilesystemMT for BackFS {
                 let nbytes = try!(libc_wrappers::lgetxattr(real, name.to_owned(), &mut[]));
                 Ok(Xattr::Size(nbytes as u32))
             }
+        } else if name == extra {
+            let nbytes = self.fscache.count_cached_bytes(path.as_os_str());
+            let mut data = format!("{}", nbytes).into_bytes();
+            data.truncate(size as usize);
+            Ok(Xattr::Data(data))
         } else {
-            if name == extra {
-                let nbytes = self.fscache.count_cached_bytes(path.as_os_str());
-                let mut data = format!("{}", nbytes).into_bytes();
-                data.truncate(size as usize);
-                Ok(Xattr::Data(data))
-            } else {
-                let mut data = Vec::<u8>::with_capacity(size as usize);
-                unsafe { data.set_len(size as usize) };
-                let nread = try!(libc_wrappers::lgetxattr(real, name.to_owned(), data.as_mut_slice()));
-                data.truncate(nread);
-                Ok(Xattr::Data(data))
-            }
+            let mut data = Vec::<u8>::with_capacity(size as usize);
+            unsafe { data.set_len(size as usize) };
+            let nread = try!(libc_wrappers::lgetxattr(real, name.to_owned(), data.as_mut_slice()));
+            data.truncate(nread);
+            Ok(Xattr::Data(data))
         }
     }
 

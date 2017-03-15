@@ -104,7 +104,7 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
 
     fn write_next_bucket_number(&self, bucket_number: u64) -> io::Result<()> {
         let path = PathBuf::from(&self.buckets_dir).join("next_bucket_number");
-        utils::write_number_file(&path, bucket_number)
+        utils::write_number_file(&path, &bucket_number)
     }
 
     fn for_each_bucket<F>(&self, mut handler: F) -> io::Result<()>

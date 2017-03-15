@@ -72,7 +72,7 @@ fn make_path_relative_to<T: AsRef<Path> + ?Sized,
             Err(_) => {
                 // No match yet; try to back up another level.
                 match reference_truncated.parent() {
-                    Some(ref t) => {
+                    Some(t) => {
                         reference_truncated = t;
                         if !first { // Just changing the filename doesn't require '..'
                             path_adjusted.push("..");

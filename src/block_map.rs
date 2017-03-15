@@ -131,7 +131,7 @@ impl CacheBlockMap for FSCacheBlockMap {
                 "set_file_mtime: error creating {:?}", file_map_dir);
 
         let mtime_file = file_map_dir.join("mtime");
-        trylog!(utils::write_number_file(&mtime_file, mtime),
+        trylog!(utils::write_number_file(&mtime_file, &mtime),
                 "failed to write mtime file {:?}", mtime_file);
 
         Ok(())

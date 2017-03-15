@@ -219,12 +219,10 @@ impl PathLinkedList for FSLL {
             try!(self.makelink(&self.base_dir, &self.tail_link, Some(path)));
             try!(self.makelink(path, Path::new("next"), None::<&Path>));
             try!(self.makelink(path, Path::new("prev"), None::<&Path>));
+        } else if maybe_head.is_some() {
+            error_ret!("list has a head {:?} but no tail!", maybe_head.unwrap());
         } else {
-            if maybe_head.is_some() {
-                error_ret!("list has a head {:?} but no tail!", maybe_head.unwrap());
-            } else {
-                error_ret!("list has a tail {:?} but no head!", maybe_tail.unwrap());
-            }
+            error_ret!("list has a tail {:?} but no head!", maybe_tail.unwrap());
         }
 
         Ok(())
@@ -244,12 +242,10 @@ impl PathLinkedList for FSLL {
             try!(self.makelink(&self.base_dir, &self.tail_link, Some(path)));
             try!(self.makelink(path, Path::new("next"), None::<&Path>));
             try!(self.makelink(path, Path::new("prev"), None::<&Path>));
+        } else if maybe_head.is_some() {
+            error_ret!("list has a head {:?} but no tail!", maybe_head.unwrap());
         } else {
-            if maybe_head.is_some() {
-                error_ret!("list has a head {:?} but no tail!", maybe_head.unwrap());
-            } else {
-                error_ret!("list has a tail {:?} but no head!", maybe_tail.unwrap());
-            }
+            error_ret!("list has a tail {:?} but no head!", maybe_tail.unwrap());
         }
 
         Ok(())

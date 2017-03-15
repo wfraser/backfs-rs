@@ -53,14 +53,14 @@ pub struct BackfsSettings {
 }
 
 fn parse_human_number(s: &str) -> Result<u64, <u64 as FromStr>::Err> {
-    let (multiplier, s) = if s.ends_with("T") {
-        (1024 * 1024 * 1024 * 1024, s.trim_right_matches("T"))
-    } else if s.ends_with("G") {
-        (1024 * 1024 * 1024, s.trim_right_matches("G"))
-    } else if s.ends_with("M") {
-        (1024 * 1024, s.trim_right_matches("M"))
-    } else if s.ends_with("K") {
-        (1024, s.trim_right_matches("K"))
+    let (multiplier, s) = if s.ends_with('T') {
+        (1024 * 1024 * 1024 * 1024, s.trim_right_matches('T'))
+    } else if s.ends_with('G') {
+        (1024 * 1024 * 1024, s.trim_right_matches('G'))
+    } else if s.ends_with('M') {
+        (1024 * 1024, s.trim_right_matches('M'))
+    } else if s.ends_with('K') {
+        (1024, s.trim_right_matches('K'))
     } else {
         (1, s)
     };
@@ -72,7 +72,7 @@ fn parse_human_number(s: &str) -> Result<u64, <u64 as FromStr>::Err> {
 }
 
 impl BackfsSettings {
-    pub fn parse(args: &Vec<OsString>) -> BackfsSettings {
+    pub fn parse(args: &[OsString]) -> BackfsSettings {
 
         // These are the default settings:
         let mut settings = BackfsSettings {
@@ -108,32 +108,30 @@ impl BackfsSettings {
                 }
 
                 if is_opt {
-                    for option in arg.split(',' as u8) {
+                    for option in arg.split(b',') {
                         options.push(option.to_os_string());
                     }
                     is_opt = false;
+                } else if arg == "--" {
+                    parsing_options = false;
+                } else if arg == "-h" || arg == "--help" {
+                    options.push(OsString::from("help"));
+                } else if arg == "-V" || arg == "--version" {
+                    options.push(OsString::from("version"));
+                } else if arg == "-v" || arg == "--verbose" {
+                    options.push(OsString::from("verbose"));
+                } else if arg == "-f" || arg == "--foreground" {
+                    options.push(OsString::from("foreground"));
+                } else if arg == "-d" || arg == "--debug" {
+                    options.push(OsString::from("foreground"));
+                    options.push(OsString::from("verbose"));
+                } else if arg.starts_with(&"-") {
+                    println!("unrecognized option \"{:?}\"", arg);
+                    options.push(OsString::from("help"));
+                    break;
                 } else {
-                    if arg == "--" {
-                        parsing_options = false;
-                    } else if arg == "-h" || arg == "--help" {
-                        options.push(OsString::from("help"));
-                    } else if arg == "-V" || arg == "--version" {
-                        options.push(OsString::from("version"));
-                    } else if arg == "-v" || arg == "--verbose" {
-                        options.push(OsString::from("verbose"));
-                    } else if arg == "-f" || arg == "--foreground" {
-                        options.push(OsString::from("foreground"));
-                    } else if arg == "-d" || arg == "--debug" {
-                        options.push(OsString::from("foreground"));
-                        options.push(OsString::from("verbose"));
-                    } else if arg.starts_with(&"-") {
-                        println!("unrecognized option \"{:?}\"", arg);
-                        options.push(OsString::from("help"));
-                        break;
-                    } else {
-                        parsing_options = false;
-                        values.push(arg.clone());
-                    }
+                    parsing_options = false;
+                    values.push(arg.clone());
                 }
             } else {
                 values.push(arg.clone());
@@ -142,7 +140,7 @@ impl BackfsSettings {
 
         // now interpret the options and values
         for opt in options {
-            let parts: Vec<&OsStr> = opt.splitn(2, '=' as u8).collect();
+            let parts: Vec<&OsStr> = opt.splitn(2, b'=').collect();
             if parts.len() == 2 {
                 match parts[0].to_str() {
                     Some("cache") => settings.cache = parts[1].to_os_string(),

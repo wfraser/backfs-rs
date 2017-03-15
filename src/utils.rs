@@ -106,7 +106,7 @@ pub fn read_number_file<N: Display + FromStr,
 pub fn write_number_file<N: Display + FromStr,
                      T: AsRef<Path> + ?Sized + Debug>(
                          path: &T,
-                         number: N
+                         number: &N
                     ) -> io::Result<()> {
     match OpenOptions::new()
                       .write(true)

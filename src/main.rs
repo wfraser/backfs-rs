@@ -3,6 +3,8 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
+#![allow(unknown_lints)]
+
 extern crate backfs;
 use backfs::BackFS;
 use backfs::arg_parse::{self, BackfsSettings};
@@ -24,7 +26,6 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
-use std::mem;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process;
@@ -41,7 +42,8 @@ impl<T: Deref> VecDeref<T> for Vec<T> {
 
 fn redirect_input_to_null() -> io::Result<()> {
     unsafe {
-        let fd: libc::c_int = libc::open(mem::transmute(b"/dev/null\0"), libc::O_RDONLY);
+        let fd: libc::c_int = libc::open(b"/dev/null\0" as *const u8 as *const libc::c_char,
+                                         libc::O_RDONLY);
         if fd == -1 {
             return Err(io::Error::last_os_error());
         }
@@ -76,11 +78,11 @@ fn main() {
 
         if settings.help {
             println!("{}\nFUSE options:", arg_parse::USAGE);
-            options.push(&OsStr::new("--help"));
+            options.push(OsStr::new("--help"));
         } else if settings.version {
-            print!("BackFS version: {} {}\nFuseMT version: {}\n",
-                   backfs::VERSION, backfs::GIT_REVISION, fuse_mt::VERSION);
-            options.push(&OsStr::new("--version"));
+            println!("BackFS version: {} {}\nFuseMT version: {}",
+                     backfs::VERSION, backfs::GIT_REVISION, fuse_mt::VERSION);
+            options.push(OsStr::new("--version"));
         }
 
         struct DummyFS;
@@ -143,10 +145,10 @@ fn main() {
     }
 
     let mut fuse_args: Vec<OsString> = vec![];
-    if settings.fuse_options.len() > 0 {
+    if !settings.fuse_options.is_empty() {
         let mut fuse_options = OsString::new();
 
-        for option in settings.fuse_options.iter() {
+        for option in &settings.fuse_options {
             if option.starts_with(&"-") {
                 fuse_args.push(OsString::from(option));
             } else {

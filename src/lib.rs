@@ -3,6 +3,8 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
+#![allow(unknown_lints)]
+
 extern crate daemonize;
 extern crate fuse_mt;
 extern crate libc;

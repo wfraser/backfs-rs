@@ -151,8 +151,8 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
         let path: &Path = path.as_ref();
         debug!("invalidate_path: {:?}", path);
         let mut store = self.store.write().unwrap();
-        (*self.map.write().unwrap()).borrow_mut().invalidate_path(path.as_os_str(), |ref bucket_path| {
-            match (*store).borrow_mut().free_bucket(&bucket_path) {
+        (*self.map.write().unwrap()).borrow_mut().invalidate_path(path.as_os_str(), |bucket_path| {
+            match (*store).borrow_mut().free_bucket(bucket_path) {
                 Ok(n) => {
                     info!("freed {} bytes from bucket {:?}", n, bucket_path);
                     Ok(())
@@ -198,6 +198,7 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
         Ok(())
     }
 
+    #[allow(cyclomatic_complexity)] // FIXME: split this up into smaller pieces
     fn fetch<F>(&self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
             -> io::Result<Vec<u8>>
             where F: Read + Seek {
@@ -210,22 +211,25 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
         if freshness == CacheBlockMapFileResult::Stale {
             info!("cache data for {:?} is stale; invalidating", path);
             let mut store = self.store.write().unwrap();
-            trylog!((*self.map.write().unwrap()).borrow_mut().invalidate_path(path, |bucket_path| (*store).borrow_mut().free_bucket(bucket_path).and(Ok(()))),
-                    "failed to invalidate stale cache data for {:?}", path);
+            let mut map = self.map.write().unwrap();
+            trylog!(
+                (*map).borrow_mut().invalidate_path(
+                    path,
+                    |bucket_path| (*store).borrow_mut().free_bucket(bucket_path).and(Ok(()))
+                ),
+                "failed to invalidate stale cache data for {:?}", path);
         }
 
         if freshness != CacheBlockMapFileResult::Current {
             // TODO: make a macro for this type of retry loop
             let mut store = self.store.write().unwrap();
             let mut map = self.map.write().unwrap();
-            loop {
-                match (*map).borrow_mut().set_file_mtime(path, mtime) {
-                    Err(e) => {
-                        if e.raw_os_error() == Some(::libc::ENOSPC) {
-                            try!((*store).borrow_mut().delete_something());
-                        }
-                    },
-                    Ok(()) => { break; },
+            while let Err(e) = (*map).borrow_mut().set_file_mtime(path, mtime) {
+                if e.raw_os_error() == Some(::libc::ENOSPC) {
+                    try!((*store).borrow_mut().delete_something());
+                } else {
+                    error!("failed to set mtime file {:?}: {}", path, e);
+                    return Err(e);
                 }
             }
         }
@@ -324,14 +328,12 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
             if block_start != 0 || block_end != nread {
                 // read a slice of the block
                 result.extend(&block_data[block_start as usize .. block_end as usize]);
+            } else if block == first_block && block == last_block {
+                // Optimization for the common case where we read exactly 1 block.
+                return Ok(block_data);
             } else {
-                if block == first_block && block == last_block {
-                    // Optimization for the common case where we read exactly 1 block.
-                    return Ok(block_data);
-                } else {
-                    // Take the whole block and add it to the result set.
-                    result.extend(block_data.drain(..));
-                }
+                // Take the whole block and add it to the result set.
+                result.extend(block_data.drain(..));
             }
 
             if nread < self.block_size {

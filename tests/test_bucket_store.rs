@@ -3,7 +3,7 @@
 // Copyright (c) 2016 by William R. Fraser
 //
 
-use std::collections::LinkedList;
+use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::ops::IndexMut;
@@ -20,8 +20,8 @@ pub struct TestBucket {
 
 pub struct TestBucketStore {
     pub buckets: Vec<TestBucket>,
-    pub used_list: LinkedList<usize>,
-    pub free_list: LinkedList<usize>,
+    pub used_list: VecDeque<usize>,
+    pub free_list: VecDeque<usize>,
     pub used_bytes: u64,
     pub max_bytes: Option<u64>,
 }
@@ -30,8 +30,8 @@ fn parse_path(path: &OsStr) -> usize {
     path.to_str().unwrap().parse().unwrap()
 }
 
-fn list_disconnect<T>(list: &mut LinkedList<T>, index: usize) -> T {
-    let mut after: LinkedList<T> = list.split_off(index);
+fn list_disconnect<T>(list: &mut VecDeque<T>, index: usize) -> T {
+    let mut after: VecDeque<T> = list.split_off(index);
     let elem = after.pop_front().unwrap();
     list.append(&mut after);
     elem
@@ -41,8 +41,8 @@ impl TestBucketStore {
     pub fn new(max_bytes: Option<u64>) -> TestBucketStore {
         TestBucketStore {
             buckets: vec![],
-            used_list: LinkedList::new(),
-            free_list: LinkedList::new(),
+            used_list: VecDeque::new(),
+            free_list: VecDeque::new(),
             used_bytes: 0,
             max_bytes: max_bytes,
         }
@@ -131,7 +131,7 @@ impl CacheBucketStore for TestBucketStore {
             let path = format!("{}", i);
             let parent_opt = &self.buckets[i].parent;
             let parent_opt_ref = parent_opt.as_ref().map(|x| x.as_ref());
-            handler(&OsStr::new(&path), parent_opt_ref).unwrap();
+            handler(OsStr::new(&path), parent_opt_ref).unwrap();
         }
         Ok(())
     }
@@ -140,7 +140,7 @@ impl CacheBucketStore for TestBucketStore {
         let number = parse_path(bucket_path);
         let bucket_result: io::Result<&TestBucket> = self.buckets
             .get(number)
-            .ok_or(io::Error::new(io::ErrorKind::NotFound, "bucket not found"));
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "bucket not found"));
         try!(bucket_result).data
             .as_ref()
             .map_or(Ok(0), |data| Ok(data.len() as u64))
