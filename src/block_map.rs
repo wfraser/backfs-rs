@@ -171,6 +171,10 @@ impl CacheBlockMap for FSCacheBlockMap {
     fn unmap_block(&mut self, map_block_path: &OsStr) -> io::Result<()> {
         debug!("unmapping {:?}", &map_block_path);
 
+        let parent_link = PathBuf::from(map_block_path).join("parent");
+        trylog!(fs::remove_file(&parent_link),
+                "unable to remove block parent link {:?}", parent_link);
+
         trylog!(fs::remove_file(&map_block_path),
                 "unable to remove map block link {:?}", map_block_path);
 

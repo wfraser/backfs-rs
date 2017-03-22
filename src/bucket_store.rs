@@ -5,7 +5,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use fsll::PathLinkedList;
@@ -184,13 +184,14 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
 
     fn new_bucket(&mut self) -> io::Result<PathBuf> {
         let bucket_path = PathBuf::from(&self.buckets_dir).join(format!("{}", self.next_bucket_number));
+        // TODO: this should be a retry loop
         trylog!(fs::create_dir(&bucket_path),
                 "error creating bucket directory {:?}", bucket_path);
-        self.next_bucket_number += 1;
-        trylog!(self.write_next_bucket_number(self.next_bucket_number),
+        trylog!(self.write_next_bucket_number(self.next_bucket_number + 1),
                 "error writing next bucket number");
         trylog!(self.used_list.insert_as_head(&bucket_path),
                 "error setting bucket as head of used list");
+        self.next_bucket_number += 1;
         Ok(bucket_path)
     }
 
@@ -279,24 +280,73 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
             }
         }
 
-        let bucket_path: PathBuf = trylog!(self.get_bucket(),
-                                           "put: error getting bucket");
+        let bucket_path: PathBuf;
+        loop {
+            match self.get_bucket() {
+                Ok(path) => {
+                    bucket_path = path;
+                    break;
+                },
+                Err(e) => {
+                    if e.raw_os_error() == Some(libc::ENOSPC) {
+                        info!("put: error getting bucket: {}", e);
+                        trylog!(self.delete_something(), "put: error freeing up space");
+                    } else {
+                        error!("put: error getting bucket: {}", e);
+                        return Err(e);
+                    }
+                }
+            }
+        }
 
-        trylog!(link::makelink(&bucket_path, "parent", Some(parent)),
-                "failed to write parent link from bucket {:?} to {:?}", bucket_path, parent);
+        loop {
+            match link::makelink(&bucket_path, "parent", Some(parent)) {
+                Ok(()) => break,
+                Err(e) => {
+                    if e.raw_os_error() == Some(libc::ENOSPC) {
+                        info!("put: failed to write parent link from bucket {:?} to {:?}: {}",
+                              bucket_path, parent, e);
+                        trylog!(self.delete_something(), "put: error freeing up space");
+                    } else {
+                        error!("put: failed to write parent link from bucket {:?} to {:?}: {}",
+                               bucket_path, parent, e);
+                        return Err(e);
+                    }
+                }
+            }
+        }
 
         let data_path = bucket_path.join("data");
 
-        let mut data_file = trylog!(OpenOptions::new()
-                                                .write(true)
-                                                .create(true)
-                                                .open(&data_path),
-                                    "put: error opening data file {:?}", data_path);
+        let mut data_file: File;
+        loop {
+            match OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&data_path)
+            {
+                Ok(file) => {
+                    data_file = file;
+                    break;
+                },
+                Err(e) => {
+                    if e.raw_os_error() == Some(libc::ENOSPC) {
+                        info!("put: error opening data file {:?}: {}", data_path, e);
+                        trylog!(self.delete_something(), "put: error freeing up space");
+                    } else {
+                        error!("put: error opening data file {:?}: {}", data_path, e);
+                        return Err(e);
+                    }
+                }
+            }
+        };
 
         loop {
             match data_file.write_all(data) {
                 Ok(()) => { break; },
                 Err(e) => {
+                    trylog!(data_file.seek(SeekFrom::Start(0)),
+                            "put: failed to reset partial data file");
                     if e.raw_os_error() == Some(libc::ENOSPC) {
                         info!("put: out of space; freeing buckets");
                         let (map_path, n) = trylog!(self.delete_something(),
