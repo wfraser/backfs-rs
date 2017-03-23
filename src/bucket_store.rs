@@ -265,8 +265,48 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
         }
     }
 
+    #[allow(cyclomatic_complexity)] // the retry loops really blow this up
     fn put<F>(&mut self, parent: &OsStr, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
-            where F: FnMut(&OsStr) -> io::Result<()> {
+            where F: FnMut(&OsStr) -> io::Result<()>
+    {
+        macro_rules! innerlog {
+            ($level:expr, $e:expr, $fmt:expr, $($args:tt)+) => {
+                log2!($level, concat!($fmt, ": {}"), $($args)+, $e);
+            };
+            ($level:expr, $e:expr, $fmt:expr) => {
+                log2!($level, concat!($fmt, ": {}"), $e);
+            }
+        }
+
+        macro_rules! retry_enospc {
+            ($e:expr, $($errlog:tt)*) => {
+                {
+                    let retval;
+                    loop {
+                        match $e {
+                            Ok(x) => {
+                                retval = x;
+                                break;
+                            },
+                            Err(ref e) if e.raw_os_error() == Some(libc::ENOSPC) => {
+                                innerlog!(log::LogLevel::Info, e, $($errlog)*);
+                                let (map_path, n) = trylog!(self.delete_something(),
+                                                            "put: error freeing up space");
+                                trylog!(delete_handler(&map_path),
+                                        "put: delete handler returned error");
+                                info!("freed {} bytes; trying again", n);
+                            },
+                            Err(e) => {
+                                innerlog!(log::LogLevel::Error, e, $($errlog)*);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    retval
+                }
+            }
+        }
+
         loop {
             let bytes_needed = self.free_bytes_needed_for_write(data.len() as u64);
             if bytes_needed > 0 {
@@ -280,87 +320,22 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
             }
         }
 
-        let bucket_path: PathBuf;
-        loop {
-            match self.get_bucket() {
-                Ok(path) => {
-                    bucket_path = path;
-                    break;
-                },
-                Err(e) => {
-                    if e.raw_os_error() == Some(libc::ENOSPC) {
-                        info!("put: error getting bucket: {}", e);
-                        trylog!(self.delete_something(), "put: error freeing up space");
-                    } else {
-                        error!("put: error getting bucket: {}", e);
-                        return Err(e);
-                    }
-                }
-            }
-        }
-
-        loop {
-            match link::makelink(&bucket_path, "parent", Some(parent)) {
-                Ok(()) => break,
-                Err(e) => {
-                    if e.raw_os_error() == Some(libc::ENOSPC) {
-                        info!("put: failed to write parent link from bucket {:?} to {:?}: {}",
-                              bucket_path, parent, e);
-                        trylog!(self.delete_something(), "put: error freeing up space");
-                    } else {
-                        error!("put: failed to write parent link from bucket {:?} to {:?}: {}",
-                               bucket_path, parent, e);
-                        return Err(e);
-                    }
-                }
-            }
-        }
+        let bucket_path = retry_enospc!(self.get_bucket(), "put: error getting bucket");
+        retry_enospc!(link::makelink(&bucket_path, "parent", Some(parent)),
+                      "put: failed to write parent link from bucket {:?} to {:?}",
+                      bucket_path, parent);
 
         let data_path = bucket_path.join("data");
+        let mut data_file = retry_enospc!(
+            OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .open(&data_path),
+            "put: error opening data file {:?}", data_path
+        );
 
-        let mut data_file: File;
-        loop {
-            match OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(&data_path)
-            {
-                Ok(file) => {
-                    data_file = file;
-                    break;
-                },
-                Err(e) => {
-                    if e.raw_os_error() == Some(libc::ENOSPC) {
-                        info!("put: error opening data file {:?}: {}", data_path, e);
-                        trylog!(self.delete_something(), "put: error freeing up space");
-                    } else {
-                        error!("put: error opening data file {:?}: {}", data_path, e);
-                        return Err(e);
-                    }
-                }
-            }
-        };
-
-        loop {
-            match data_file.write_all(data) {
-                Ok(()) => { break; },
-                Err(e) => {
-                    trylog!(data_file.seek(SeekFrom::Start(0)),
-                            "put: failed to reset partial data file");
-                    if e.raw_os_error() == Some(libc::ENOSPC) {
-                        info!("put: out of space; freeing buckets");
-                        let (map_path, n) = trylog!(self.delete_something(),
-                                                        "put: error freeing up space");
-                        trylog!(delete_handler(&map_path),
-                                "put: delete handler returned error");
-                        info!("freed {} bytes; trying the write again", n);
-                    } else {
-                        error!("put: error writing to cache data file {:?}: {}", data_path, e);
-                        return Err(e);
-                    }
-                }
-            }
-        }
+        retry_enospc!(data_file.seek(SeekFrom::Start(0)).and_then(|_| data_file.write_all(data)),
+                      "put: failed to write to cache data file {:?}", data_path);
 
         self.used_bytes += data.len() as u64;
         debug!("used space now {} bytes", self.used_bytes);
