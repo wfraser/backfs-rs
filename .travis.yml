@@ -9,6 +9,9 @@ os:
 matrix:
     allow_failures:
         - rust: nightly
+        # FIXME: rust doc test on rustc 1.16.0 + macOS is broken
+        - rust: stable
+          os: osx
 install:
     - if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo apt-get -qq update && sudo apt-get install -y libfuse-dev; fi
     - if [ "$TRAVIS_OS_NAME" == "osx" ]; then brew update && brew tap caskroom/cask && brew cask install osxfuse; fi
