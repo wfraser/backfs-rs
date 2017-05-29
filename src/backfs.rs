@@ -40,7 +40,6 @@ const BACKFS_VERSION_FILE_PATH: &'static str = "/.backfs_version";
 const BACKFS_CONTROL_FILE_HELP: &'static str = "commands: test, noop, invalidate <path>, free_orphans\n";
 
 const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
-    ino: 0,
     size: 0,
     blocks: 0,
     atime: Timespec { sec: super::BUILD_TIME, nsec: 0 },
@@ -215,7 +214,6 @@ impl BackFS {
                 }
 
                 Ok(FileAttr {
-                    ino: 0,
                     size: stat.st_size as u64,
                     blocks: stat.st_blocks as u64,
                     atime: Timespec { sec: stat.st_atime as i64, nsec: stat.st_atime_nsec as i32 },
@@ -342,32 +340,7 @@ impl FilesystemMT for BackFS {
         debug!("destroy");
     }
 
-    fn lookup(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr) -> ResultEntry {
-        // Combine the parent path and the name being looked up.
-        let path = PathBuf::from(parent_path).join(name);
-        debug!("lookup: {:?}", path);
-
-        if let Some(attr) = backfs_fake_file_attr(path.to_str()) {
-            return Ok((TTL, attr));
-        }
-
-        match self.stat_real(&path) {
-            Ok(attr) => {
-                Ok((TTL, attr))
-            }
-            Err(e) => {
-                let msg = format!("lookup: {:?}: {}", path, e);
-                if e.raw_os_error() == Some(libc::ENOENT) {
-                    debug!("{}", msg);
-                } else {
-                    error!("{}", msg);
-                }
-                Err(e.raw_os_error().unwrap_or(libc::EIO))
-            }
-        }
-    }
-
-    fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultGetattr {
+    fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
         debug!("getattr: {:?}", path);
 
         if let Some(attr) = backfs_fake_file_attr(path.to_str()) {
@@ -381,7 +354,12 @@ impl FilesystemMT for BackFS {
                 Ok((TTL, attr))
             },
             Err(e) => {
-                error!("getattr: {:?}: {}", path, e);
+                let msg = format!("getattr: {:?}: {}", path, e);
+                if e.raw_os_error() == Some(libc::ENOENT) {
+                    debug!("{}", msg);
+                } else {
+                    error!("{}", msg);
+                }
                 Err(e.raw_os_error().unwrap_or(libc::EIO))
             }
         }
