@@ -12,39 +12,11 @@ use std::path::Path;
 use std::str::FromStr;
 use libc;
 
-pub fn open_or_create_file<T: AsRef<Path> + ?Sized + Debug>(path: &T) -> io::Result<(File, bool)> {
-    match OpenOptions::new()
-                      .read(true)
-                      .write(true)
-                      .open(path) {
-        Ok(file) => Ok((file, false)),
-        Err(e) => {
-            if e.raw_os_error() == Some(libc::ENOENT) {
-                match OpenOptions::new()
-                                  .read(true)
-                                  .write(true)
-                                  .create(true)
-                                  .open(path) {
-                    Ok(file) => Ok((file, true)),
-                    Err(e) => {
-                        error!("error creating file {:?}: {}", path, e);
-                        Err(e)
-                    }
-                }
-            } else {
-                error!("error opening file {:?}: {}", path, e);
-                Err(e)
-            }
-        }
-    }
-}
-
-pub fn read_number_file<N: Display + FromStr,
-                        T: AsRef<Path> + ?Sized + Debug>(
-                            path: &T,
-                            default: Option<N>
-                        ) -> io::Result<Option<N>>
-                        where <N as FromStr>::Err: Debug {
+pub fn read_number_file<N, P>(path: &P, default: Option<N>) -> io::Result<Option<N>>
+        where N: Display + FromStr,
+              <N as FromStr>::Err: Debug,
+              P: AsRef<Path> + ?Sized + Debug
+{
     let (mut file, new) = if default.is_none() {
         // If no default value was given, don't create a file, just open the existing one if
         // there is one, or return None.
@@ -54,13 +26,31 @@ pub fn read_number_file<N: Display + FromStr,
                 if e.raw_os_error() == Some(libc::ENOENT) {
                     return Ok(None);
                 } else {
+                    error!("read_number_file: error creating file {:?}: {}", path, e);
                     return Err(e);
                 }
             }
         };
         (file, false)
     } else {
-        try!(open_or_create_file(path))
+        let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(path)
+                .map_err(|e| {
+                    error!("read_number_file: error creating file {:?}: {}", path, e);
+                    e
+                })?;
+
+        let new = file.metadata()
+                .map_err(|e| {
+                    error!("read_number_file: error getting metadata for {:?}: {}", path, e);
+                    e
+                })?
+                .len() == 0;
+
+        (file, new)
     };
 
     if new {
@@ -103,11 +93,10 @@ pub fn read_number_file<N: Display + FromStr,
     }
 }
 
-pub fn write_number_file<N: Display + FromStr,
-                     T: AsRef<Path> + ?Sized + Debug>(
-                         path: &T,
-                         number: &N
-                    ) -> io::Result<()> {
+pub fn write_number_file<N, P>(path: &P, number: &N) -> io::Result<()>
+    where N: Display + FromStr,
+          P: AsRef<Path> + ?Sized + Debug
+{
     match OpenOptions::new()
                       .write(true)
                       .truncate(true)
@@ -127,7 +116,9 @@ pub fn write_number_file<N: Display + FromStr,
     Ok(())
 }
 
-pub fn create_dir_and_check_access<T: AsRef<Path> + ?Sized + Debug>(path: &T) -> io::Result<()> {
+pub fn create_dir_and_check_access<T>(path: &T) -> io::Result<()>
+    where T: AsRef<Path> + ?Sized + Debug
+{
     let path = path.as_ref();
     if let Err(e) = fs::create_dir(&path) {
         // Already existing is fine.
