@@ -9,7 +9,6 @@ use std::io;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::str;
 
-extern crate backfs;
 use backfs::block_map::*;
 use backfs::osstrextras::OsStrExtras;
 

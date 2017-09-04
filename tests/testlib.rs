@@ -15,12 +15,10 @@ use backfs::fscache::*;
 use backfs::block_map::*;
 use backfs::bucket_store::*;
 
-mod test_block_map;
-use test_block_map::*;
-mod test_bucket_store;
-use test_bucket_store::*;
-mod sneaky;
-use sneaky::*;
+mod mocks;
+use mocks::test_block_map::*;
+use mocks::test_bucket_store::*;
+use mocks::sneaky::*;
 
 macro_rules! stderrln {
     ($($args:tt)+) => { {writeln!(io::stderr(), $($args)+)}.unwrap() };
@@ -133,8 +131,8 @@ fn test_fscache_free_orphans() {
     let filenames = vec!["one", "two", "three", "four", "five"];
     let (cache, mut map_sneak, mut store_sneak) = construct_cache(block_size, max_size);
 
-    let mut map: &mut TestMap = map_sneak.borrow_mut();
-    let mut store: &mut TestBucketStore = store_sneak.borrow_mut();
+    let map: &mut TestMap = map_sneak.borrow_mut();
+    let store: &mut TestBucketStore = store_sneak.borrow_mut();
 
     // pre-load the cache with blocks of each of the files.
     for filename in &filenames {

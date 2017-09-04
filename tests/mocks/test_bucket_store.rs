@@ -6,11 +6,9 @@
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::io;
-use std::ops::IndexMut;
 
 extern crate libc;
 
-extern crate backfs;
 use backfs::bucket_store::*;
 
 pub struct TestBucket {
@@ -80,7 +78,7 @@ impl CacheBucketStore for TestBucketStore {
 
         self.used_list.push_front(index);
 
-        self.buckets.index_mut(index).data = Some(Vec::from(data));
+        self.buckets[index].data = Some(Vec::from(data));
         self.used_bytes += data.len() as u64;
 
         Ok(OsString::from(format!("{}", index)))
@@ -96,7 +94,7 @@ impl CacheBucketStore for TestBucketStore {
             self.free_list.push_front(number);
         }
 
-        let mut bucket = self.buckets.index_mut(number);
+        let bucket = &mut self.buckets[number];
         let n = bucket.data.as_ref().unwrap().len() as u64;
         bucket.data = None;
 
@@ -108,7 +106,7 @@ impl CacheBucketStore for TestBucketStore {
         let number = self.used_list.pop_back().unwrap();
         self.free_list.push_front(number);
 
-        let mut bucket = self.buckets.index_mut(number);
+        let bucket = &mut self.buckets[number];
         let n = bucket.data.as_ref().unwrap().len() as u64;
         bucket.data = None;
         let parent = ::std::mem::replace(&mut bucket.parent, None);
