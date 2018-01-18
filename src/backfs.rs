@@ -1,6 +1,6 @@
 // BackFS FUSE Filesystem implementation
 //
-// Copyright (c) 2016 by William R. Fraser
+// Copyright 2016-2018 by William R. Fraser
 //
 
 use std::cmp;
@@ -31,13 +31,13 @@ use time::Timespec;
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
-const BACKFS_CONTROL_FILE_NAME: &'static str = ".backfs_control";
-const BACKFS_CONTROL_FILE_PATH: &'static str = "/.backfs_control";
+const BACKFS_CONTROL_FILE_NAME: &str = ".backfs_control";
+const BACKFS_CONTROL_FILE_PATH: &str = "/.backfs_control";
 
-const BACKFS_VERSION_FILE_NAME: &'static str = ".backfs_version";
-const BACKFS_VERSION_FILE_PATH: &'static str = "/.backfs_version";
+const BACKFS_VERSION_FILE_NAME: &str = ".backfs_version";
+const BACKFS_VERSION_FILE_PATH: &str = "/.backfs_version";
 
-const BACKFS_CONTROL_FILE_HELP: &'static str = "commands: test, noop, invalidate <path>, free_orphans\n";
+const BACKFS_CONTROL_FILE_HELP: &str = "commands: test, noop, invalidate <path>, free_orphans\n";
 
 const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
     size: 0,
@@ -246,12 +246,12 @@ impl BackFS {
         }
     }
 
-    fn backfs_control_file_write(&self, data: Vec<u8>) -> ResultWrite {
+    fn backfs_control_file_write(&self, data: &[u8]) -> ResultWrite {
         // remove a trailing newline if it exists
         let data_trimmed = if data.last() == Some(&0x0A) {
             &data[..data.len() - 1]
         } else {
-            &data
+            data
         };
 
         let first_space = data_trimmed.iter().position(|x| *x == 0x20)
@@ -555,7 +555,7 @@ impl FilesystemMT for BackFS {
 
         match path.to_str() {
             Some(BACKFS_CONTROL_FILE_PATH) => {
-                return self.backfs_control_file_write(data);
+                return self.backfs_control_file_write(&data);
             },
             Some(BACKFS_VERSION_FILE_PATH) => {
                 return Err(libc::EACCES);

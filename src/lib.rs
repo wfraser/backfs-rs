@@ -1,9 +1,13 @@
 // BackFS Library Crate Module Definitions and External Dependency List
 //
-// Copyright (c) 2016 by William R. Fraser
+// Copyright 2016-2018 by William R. Fraser
 //
 
-#![allow(unknown_lints)]
+// Silence unhelpful clippy lints.
+#![allow(unknown_lints, cast_lossless)]
+
+// buggy clippy lints
+#![allow(unit_expr)] // https://github.com/rust-lang-nursery/rust-clippy/issues/2095
 
 extern crate daemonize;
 extern crate fuse_mt;
@@ -24,10 +28,12 @@ mod link;
 mod utils;
 
 // This env variable is set by Cargo
-pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // These files are produced by build.rs
-pub const GIT_REVISION: &'static str = include_str!(concat!(env!("OUT_DIR"), "/git_rev.txt"));
+pub const GIT_REVISION: &str = include_str!(concat!(env!("OUT_DIR"), "/git_rev.txt"));
+
+#[allow(unreadable_literal)]
 pub const BUILD_TIME: i64 = include!(concat!(env!("OUT_DIR"), "/build_time.txt"));
 
 pub use backfs::BackFS;

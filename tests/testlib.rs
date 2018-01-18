@@ -1,9 +1,10 @@
 // BackFS Component Tests
 //
-// Copyright (c) 2016 by William R. Fraser
+// Copyright 2016-2018 by William R. Fraser
 //
 
-#![allow(unknown_lints)]
+// Silence unhelpful clippy lints.
+#![allow(unknown_lints, clone_on_ref_ptr)]
 
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsStr;

@@ -1,6 +1,6 @@
 // BackFS Filesystem Cache
 //
-// Copyright (c) 2016 by William R. Fraser
+// Copyright 2016-2018 by William R. Fraser
 //
 
 use std::borrow::BorrowMut;
@@ -117,7 +117,7 @@ impl<M, S, X1, X2> FSCache<M, S, X1, X2>
     }
 
     fn write_block_into_cache(&self, path: &OsStr, block: u64, data: &[u8]) -> io::Result<()> {
-        assert!(data.len() > 0);
+        assert!(!data.is_empty());
         let mut map = self.map.write().unwrap();
         let mut store = self.store.write().unwrap();
 

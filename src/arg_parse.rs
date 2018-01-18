@@ -1,6 +1,6 @@
 // BackFS command-line argument parsing
 //
-// Copyright (c) 2016 by William R. Fraser
+// Copyright 2016-2018 by William R. Fraser
 //
 // This is hand-rolled parsing code because none of the available command-line parsing crates I
 // found could cope with the odd 'mount'-style arguments this uses (i.e. -o foo, -o bar).
@@ -11,7 +11,7 @@ use std::ffi::{OsStr, OsString};
 use std::str::FromStr;
 use osstrextras::OsStrExtras;
 
-pub const USAGE: &'static str = "
+pub const USAGE: &str = "
 BackFS.
 
 Usage:
