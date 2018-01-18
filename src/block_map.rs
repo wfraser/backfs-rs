@@ -12,33 +12,7 @@ use link;
 use utils;
 
 use libc;
-use log;
 use walkdir::WalkDir;
-
-macro_rules! log2 {
-    ($lvl:expr, $($arg:tt)+) => (
-        log!(target: "BlockMap", $lvl, $($arg)+));
-}
-
-#[allow(unused_macros)]
-macro_rules! error {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Error, $($arg)+));
-}
-
-#[allow(unused_macros)]
-macro_rules! warn {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Warn, $($arg)+));
-}
-
-#[allow(unused_macros)]
-macro_rules! info {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Info, $($arg)+));
-}
-
-#[allow(unused_macros)]
-macro_rules! debug {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Debug, $($arg)+));
-}
 
 macro_rules! trylog {
     ($e:expr, $fmt:expr) => {

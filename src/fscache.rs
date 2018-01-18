@@ -15,35 +15,12 @@ use std::sync::RwLock;
 use block_map::{CacheBlockMap, CacheBlockMapFileResult};
 use bucket_store::CacheBucketStore;
 
-use log;
-
 pub struct FSCache<M, S, X1, X2> {
     map: RwLock<M>,
     store: RwLock<S>,
     block_size: u64,
     phantom1: PhantomData<X1>,
     phantom2: PhantomData<X2>
-}
-
-macro_rules! log2 {
-    ($lvl:expr, $($arg:tt)+) => (
-        log!(target: "FSCache", $lvl, $($arg)+));
-}
-
-macro_rules! error {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Error, $($arg)+));
-}
-
-macro_rules! warn {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Warn, $($arg)+));
-}
-
-macro_rules! info {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Info, $($arg)+));
-}
-
-macro_rules! debug {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Debug, $($arg)+));
 }
 
 macro_rules! trylog {

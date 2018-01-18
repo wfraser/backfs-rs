@@ -41,27 +41,6 @@ pub struct FSCacheBucketStore<LL: PathLinkedList> {
     next_bucket_number: u64,
 }
 
-macro_rules! log2 {
-    ($lvl:expr, $($arg:tt)+) => (
-        log!(target: "BucketStore", $lvl, $($arg)+));
-}
-
-macro_rules! error {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Error, $($arg)+));
-}
-
-macro_rules! warn {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Warn, $($arg)+));
-}
-
-macro_rules! info {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Info, $($arg)+));
-}
-
-macro_rules! debug {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Debug, $($arg)+));
-}
-
 macro_rules! trylog {
     ($e:expr, $fmt:expr) => {
         match $e {
@@ -271,10 +250,10 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
     {
         macro_rules! innerlog {
             ($level:expr, $e:expr, $fmt:expr, $($args:tt)+) => {
-                log2!($level, concat!($fmt, ": {}"), $($args)+, $e);
+                log!($level, concat!($fmt, ": {}"), $($args)+, $e);
             };
             ($level:expr, $e:expr, $fmt:expr) => {
-                log2!($level, concat!($fmt, ": {}"), $e);
+                log!($level, concat!($fmt, ": {}"), $e);
             }
         }
 
@@ -289,7 +268,7 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
                                 break;
                             },
                             Err(ref e) if e.raw_os_error() == Some(libc::ENOSPC) => {
-                                innerlog!(log::LogLevel::Info, e, $($errlog)*);
+                                innerlog!(log::Level::Info, e, $($errlog)*);
                                 let (map_path, n) = trylog!(self.delete_something(),
                                                             "put: error freeing up space");
                                 trylog!(delete_handler(&map_path),
@@ -297,7 +276,7 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
                                 info!("freed {} bytes; trying again", n);
                             },
                             Err(e) => {
-                                innerlog!(log::LogLevel::Error, e, $($errlog)*);
+                                innerlog!(log::Level::Error, e, $($errlog)*);
                                 return Err(e);
                             }
                         }

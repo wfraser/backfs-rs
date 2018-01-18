@@ -132,10 +132,10 @@ fn main() {
 
         if settings.verbose {
             // FSLL debug messages aren't very interesting most of the time.
-            let filters = vec![("FSLL".to_string(), log::LogLevelFilter::Warn)];
-            log_output::init(log::LogLevelFilter::Debug, filters, !settings.foreground)
+            let filters = vec![("backfs::fsll".to_string(), log::LevelFilter::Warn)];
+            log_output::init(log::LevelFilter::Debug, filters, !settings.foreground)
         } else {
-            log_output::init(log::LogLevelFilter::Warn, vec![], !settings.foreground)
+            log_output::init(log::LevelFilter::Warn, vec![], !settings.foreground)
         }.unwrap();
 
 

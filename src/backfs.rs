@@ -26,7 +26,6 @@ use utils;
 use daemonize::Daemonize;
 use fuse_mt::*;
 use libc;
-use log;
 use time::Timespec;
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
@@ -59,31 +58,6 @@ pub struct BackFS {
     pub settings: BackfsSettings,
     fscache: FSCache<FSCacheBlockMap, FSCacheBucketStore<FSLL>,
                      FSCacheBlockMap, FSCacheBucketStore<FSLL>>,
-}
-
-macro_rules! log2 {
-    ($lvl:expr, $($arg:tt)+) => (
-        log!(target: "BackFS", $lvl, $($arg)+));
-}
-
-#[allow(unused_macros)]
-macro_rules! error {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Error, $($arg)+));
-}
-
-#[allow(unused_macros)]
-macro_rules! warn {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Warn, $($arg)+));
-}
-
-#[allow(unused_macros)]
-macro_rules! info {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Info, $($arg)+));
-}
-
-#[allow(unused_macros)]
-macro_rules! debug {
-    ($($arg:tt)+) => (log2!(log::LogLevel::Debug, $($arg)+));
 }
 
 fn is_backfs_fake_file(path: &Path) -> bool {
