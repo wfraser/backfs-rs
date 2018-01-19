@@ -1,6 +1,6 @@
 // Symbolic Link Utilities
 //
-// Copyright (c) 2016 by William R. Fraser
+// Copyright 2016-2018 by William R. Fraser
 
 use std::path::{Component, Path, PathBuf};
 use std::fs;

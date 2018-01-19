@@ -1,6 +1,6 @@
 // Libc Wrappers :: Safe wrappers around system calls.
 //
-// Copyright (c) 2016 by William R. Fraser
+// Copyright 2016-2018 by William R. Fraser
 //
 
 use std::ffi::{CString, OsString};

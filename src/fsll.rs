@@ -1,6 +1,6 @@
 // FSLL :: Filesystem Linked List
 //
-// Copyright (c) 2016 by William R. Fraser
+// Copyright 2016-2018 by William R. Fraser
 //
 
 use std::ffi::{OsStr, OsString};
