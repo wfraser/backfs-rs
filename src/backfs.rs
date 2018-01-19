@@ -108,10 +108,7 @@ fn mode_to_filetype(mode: libc::mode_t) -> FileType {
         libc::S_IFBLK => FileType::BlockDevice,
         libc::S_IFCHR => FileType::CharDevice,
         libc::S_IFIFO  => FileType::NamedPipe,
-        libc::S_IFSOCK => {
-            warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
-            FileType::NamedPipe
-        },
+        libc::S_IFSOCK => FileType::Socket,
         _ => { panic!("unknown file type"); }
     }
 }
@@ -392,10 +389,7 @@ impl FilesystemMT for BackFS {
                         libc::DT_BLK => FileType::BlockDevice,
                         libc::DT_CHR => FileType::CharDevice,
                         libc::DT_FIFO => FileType::NamedPipe,
-                        libc::DT_SOCK => {
-                            warn!("FUSE doesn't support Socket file type; translating to NamedPipe instead.");
-                            FileType::NamedPipe
-                        },
+                        libc::DT_SOCK => FileType::Socket,
                         0 | _ => {
                             let real_path = self.real_path(&entry_path);
                             match libc_wrappers::lstat(real_path) {
