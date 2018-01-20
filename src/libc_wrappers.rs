@@ -35,6 +35,11 @@ mod libc {
     }
 
     #[cfg(target_os = "macos")]
+    pub unsafe fn fstat64(fd: c_int, stat: *mut stat64) -> c_int {
+        fstat(fd, stat)
+    }
+
+    #[cfg(target_os = "macos")]
     pub const XATTR_NOFOLLOW: c_int = 1;
 
     #[cfg(target_os = "macos")]
@@ -118,6 +123,15 @@ pub fn lstat(path: OsString) -> Result<libc::stat64, libc::c_int> {
 
     let mut buf: libc::stat64 = unsafe { mem::zeroed() };
     if -1 == unsafe { libc::lstat64(path_c.as_ptr(), &mut buf) } {
+        return Err(io::Error::last_os_error().raw_os_error().unwrap());
+    }
+
+    Ok(buf)
+}
+
+pub fn fstat(fd: usize) -> Result<libc::stat64, libc::c_int> {
+    let mut buf: libc::stat64 = unsafe { mem::zeroed() };
+    if -1 == unsafe { libc::fstat64(fd as libc::c_int, &mut buf) } {
         return Err(io::Error::last_os_error().raw_os_error().unwrap());
     }
 

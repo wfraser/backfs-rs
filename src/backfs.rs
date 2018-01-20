@@ -100,8 +100,8 @@ fn human_number(n: u64) -> String {
     }
 }
 
-fn mode_to_filetype(mode: libc::mode_t) -> FileType {
-    match mode & libc::S_IFMT {
+fn mode_to_filetype(mode: libc::mode_t) -> Result<FileType, libc::c_int> {
+    Ok(match mode & libc::S_IFMT {
         libc::S_IFDIR => FileType::Directory,
         libc::S_IFREG => FileType::RegularFile,
         libc::S_IFLNK => FileType::Symlink,
@@ -109,8 +109,11 @@ fn mode_to_filetype(mode: libc::mode_t) -> FileType {
         libc::S_IFCHR => FileType::CharDevice,
         libc::S_IFIFO  => FileType::NamedPipe,
         libc::S_IFSOCK => FileType::Socket,
-        _ => { panic!("unknown file type"); }
-    }
+        unknown => {
+            error!("unrecognized file type {:0x}", unknown);
+            return Err(libc::EIO);
+        }
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -175,46 +178,53 @@ impl BackFS {
     }
 
 
-    fn stat_real<T: AsRef<OsStr> + ::std::fmt::Debug>(&self, path: &T) -> io::Result<FileAttr> {
+    fn stat_real<T: AsRef<OsStr> + ::std::fmt::Debug>(&self, path: &T, fh: Option<u64>) 
+        -> Result<FileAttr, libc::c_int>
+    {
         let real: OsString = self.real_path(path);
-        debug!("stat_real: {:?}", real);
+        debug!("stat_real: {:?} (fh={:?})", real, fh);
 
-        match libc_wrappers::lstat(real) {
-            Ok(stat) => {
-                let kind = mode_to_filetype(stat.st_mode);
+        let result = if let Some(fh) = fh {
+            // NOTE: Currently rust-fuse doesn't ever pass us a fh because it targets too old of a
+            // FUSE ABI.)
+            libc_wrappers::fstat(fh as usize)
+        } else {
+            libc_wrappers::lstat(real)
+        };
 
-                let mut mode = stat.st_mode & 0o7777; // st_mode encodes the type AND the mode.
-                if !self.settings.rw {
-                    mode &= !0o222; // disable the write bits if we're not in RW mode.
-                }
-
-                Ok(FileAttr {
-                    size: stat.st_size as u64,
-                    blocks: stat.st_blocks as u64,
-                    atime: Timespec { sec: stat.st_atime as i64, nsec: stat.st_atime_nsec as i32 },
-                    mtime: Timespec { sec: stat.st_mtime as i64, nsec: stat.st_mtime_nsec as i32 },
-                    ctime: Timespec { sec: stat.st_ctime as i64, nsec: stat.st_ctime_nsec as i32 },
-                    crtime: Timespec { sec: 0, nsec: 0 },
-                    kind: kind,
-                    perm: mode as u16,
-                    nlink: stat.st_nlink as u32,
-                    uid: stat.st_uid,
-                    gid: stat.st_gid,
-                    rdev: stat.st_rdev as u32,
-                    flags: 0,
-                })
-            },
-            Err(e) => {
-                let err = io::Error::from_raw_os_error(e);
-                if e == libc::ENOENT {
-                    // avoid being overly noisy
-                    debug!("lstat({:?}: {}", path, err);
-                } else {
-                    error!("lstat({:?}): {}", path, err);
-                }
-                Err(err)
+        let stat = result.map_err(|errno| {
+            let msg = format!("lstat: {:?}: {}", path, io::Error::from_raw_os_error(errno));
+            if errno == libc::ENOENT {
+                // avoid being overly noisy
+                debug!("{}", msg);
+            } else {
+                error!("{}", msg);
             }
+            errno
+        })?;
+
+        let kind = mode_to_filetype(stat.st_mode)?;
+
+        let mut mode = stat.st_mode & 0o7777; // st_mode encodes the type AND the mode.
+        if !self.settings.rw {
+            mode &= !0o222; // disable the write bits if we're not in RW mode.
         }
+
+        Ok(FileAttr {
+            size: stat.st_size as u64,
+            blocks: stat.st_blocks as u64,
+            atime: Timespec { sec: stat.st_atime as i64, nsec: stat.st_atime_nsec as i32 },
+            mtime: Timespec { sec: stat.st_mtime as i64, nsec: stat.st_mtime_nsec as i32 },
+            ctime: Timespec { sec: stat.st_ctime as i64, nsec: stat.st_ctime_nsec as i32 },
+            crtime: Timespec { sec: 0, nsec: 0 },
+            kind: kind,
+            perm: mode as u16,
+            nlink: stat.st_nlink as u32,
+            uid: stat.st_uid,
+            gid: stat.st_gid,
+            rdev: stat.st_rdev as u32,
+            flags: 0,
+        })
     }
 
     fn backfs_control_file_write(&self, data: &[u8]) -> ResultWrite {
@@ -315,29 +325,25 @@ impl FilesystemMT for BackFS {
         debug!("destroy");
     }
 
-    fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
+    fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
         debug!("getattr: {:?}", path);
 
         if let Some(attr) = backfs_fake_file_attr(path.to_str()) {
             return Ok((TTL, attr));
         }
 
-        // TODO: handle the case where fh is present by calling fstat
-
-        match self.stat_real(&path) {
-            Ok(attr) => {
-                Ok((TTL, attr))
-            },
-            Err(e) => {
-                let msg = format!("getattr: {:?}: {}", path, e);
-                if e.raw_os_error() == Some(libc::ENOENT) {
+        let attr = self.stat_real(&path, fh)
+            .map_err(|errno| {
+                let msg = format!("getattr: {:?}: {}", path, io::Error::from_raw_os_error(errno));
+                if errno == libc::ENOENT {
                     debug!("{}", msg);
                 } else {
                     error!("{}", msg);
                 }
-                Err(e.raw_os_error().unwrap_or(libc::EIO))
-            }
-        }
+                errno
+            })?;
+
+        Ok((TTL, attr))
     }
 
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
@@ -382,6 +388,8 @@ impl FilesystemMT for BackFS {
 
                     let entry_path = PathBuf::from(path).join(&name);
 
+                    const DT_UNKNOWN: u8 = 0; // pending inclusion in libc
+
                     let filetype = match entry.d_type {
                         libc::DT_DIR => FileType::Directory,
                         libc::DT_REG => FileType::RegularFile,
@@ -390,10 +398,18 @@ impl FilesystemMT for BackFS {
                         libc::DT_CHR => FileType::CharDevice,
                         libc::DT_FIFO => FileType::NamedPipe,
                         libc::DT_SOCK => FileType::Socket,
-                        0 | _ => {
+                        DT_UNKNOWN | _ => {
+                            // The directory entry has no file type info included. Do an lstat to
+                            // get it. Also do this for unrecognized values before failing out,
+                            // just in case lstat gives something we recognize.
                             let real_path = self.real_path(&entry_path);
+                            if entry.d_type != DT_UNKNOWN {
+                                warn!("unrecognized dirent.d_type value {:0x} for {:?}",
+                                      entry.d_type,
+                                      real_path);
+                            }
                             match libc_wrappers::lstat(real_path) {
-                                Ok(stat64) => mode_to_filetype(stat64.st_mode),
+                                Ok(stat64) => mode_to_filetype(stat64.st_mode)?,
                                 Err(errno) => {
                                     let ioerr = io::Error::from_raw_os_error(errno);
                                     panic!("lstat failed after readdir_r gave no file type for {:?}: {}",
