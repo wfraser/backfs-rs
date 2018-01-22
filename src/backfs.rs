@@ -56,8 +56,8 @@ const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
 
 pub struct BackFS {
     pub settings: BackfsSettings,
-    fscache: FSCache<FSCacheBlockMap, FSCacheBucketStore<FSLL>,
-                     FSCacheBlockMap, FSCacheBucketStore<FSLL>>,
+    fscache: FSCache<FSCacheBlockMap, FSCacheBlockMap,
+                     FSCacheBucketStore<FSLL>, FSCacheBucketStore<FSLL>>,
 }
 
 fn is_backfs_fake_file(path: &Path) -> bool {

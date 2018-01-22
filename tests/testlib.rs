@@ -8,7 +8,7 @@
 
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsStr;
-use std::io::{self, Cursor, Write};
+use std::io::Cursor;
 use std::str;
 
 extern crate backfs;
@@ -21,22 +21,25 @@ use mocks::test_block_map::*;
 use mocks::test_bucket_store::*;
 use mocks::sneaky::*;
 
-macro_rules! stderrln {
-    ($($args:tt)+) => { {writeln!(io::stderr(), $($args)+)}.unwrap() };
-}
-
 macro_rules! cmp_u8_as_str {
-    ($left:expr, $right:expr) => (assert_eq!(str::from_utf8($left).unwrap(), str::from_utf8($right).unwrap()));
+    ($left:expr, $right:expr) => (assert_eq!(
+            str::from_utf8($left).unwrap(),
+            str::from_utf8($right).unwrap()));
 }
 
 #[allow(type_complexity)]
 fn construct_cache(block_size: u64, max_size: Option<u64>)
-        -> (FSCache<Sneaky<TestMap>, Sneaky<TestBucketStore>, TestMap, TestBucketStore>,
+        -> (FSCache<Sneaky<TestMap>, TestMap, Sneaky<TestBucketStore>, TestBucketStore>,
             Sneaky<TestMap>,
             Sneaky<TestBucketStore>) {
     let mut map_sneak = Sneaky::new(TestMap::default());
     let mut store_sneak = Sneaky::new(TestBucketStore::new(max_size));
-    let cache = unsafe { FSCache::<_, _, TestMap, TestBucketStore>::new(map_sneak.sneak(), store_sneak.sneak(), block_size) };
+    let cache = unsafe {
+        FSCache::<_, TestMap, _, TestBucketStore>::new(
+            map_sneak.sneak(),
+            store_sneak.sneak(),
+            block_size)
+    };
     (cache, map_sneak, store_sneak)
 }
 
@@ -88,7 +91,7 @@ fn test_fscache_basic(block_size: u64) {
 fn test_fscache_block_sizes() {
     // Check for fencepost errors by doing this with varying block sizes.
     for block_size in 1..31 {
-        stderrln!("block size {}", block_size);
+        eprintln!("block size {}", block_size);
         test_fscache_basic(block_size);
     }
 }

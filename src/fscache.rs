@@ -15,12 +15,21 @@ use std::sync::RwLock;
 use block_map::{CacheBlockMap, CacheBlockMapFileResult};
 use bucket_store::CacheBucketStore;
 
-pub struct FSCache<M, S, X1, X2> {
-    map: RwLock<M>,
-    store: RwLock<S>,
+// FSCache has two generic parameters for each of the block map and the bucket store.
+// The {Map, Store} parameters are for a type that can be borrowed to give an implementation of
+// the map and store traits, and {MapImpl, StoreImpl} are the concrete types that implement the
+// traits. In normal usage these are the exact same type, but for test mocking purposes, the one
+// implementing borrow may be different.
+// Ideally we wouldn't have to explicitly specify the implementation type, and could instead have
+// {Map, Store} be bounded on `BorrowMut<WhateverTrait>` directly, but because the map and block
+// traits both have functions with generic parameters themselves, Rust won't let you make a trait
+// object out of them, and so we have to explicitly parameterize over them. :(
+pub struct FSCache<Map, MapImpl, Store, StoreImpl> {
+    map: RwLock<Map>,
+    store: RwLock<Store>,
     block_size: u64,
-    phantom1: PhantomData<X1>,
-    phantom2: PhantomData<X2>
+    _p1: PhantomData<MapImpl>,
+    _p2: PhantomData<StoreImpl>,
 }
 
 macro_rules! trylog {
@@ -56,16 +65,22 @@ pub trait Cache {
     fn count_cached_bytes(&self, path: &OsStr) -> u64;
 }
 
-impl<M, S, X1, X2> FSCache<M, S, X1, X2>
-        where M: BorrowMut<X1>, X1: CacheBlockMap,
-              S: BorrowMut<X2>, X2: CacheBucketStore {
-    pub fn new(map: M, store: S, block_size: u64) -> FSCache<M, S, X1, X2> {
+impl<Map, MapImpl, Store, StoreImpl> FSCache<Map, MapImpl, Store, StoreImpl>
+where
+    Map: BorrowMut<MapImpl>,
+    MapImpl: CacheBlockMap,
+    Store: BorrowMut<StoreImpl>,
+    StoreImpl: CacheBucketStore,
+{
+    pub fn new(map: Map, store: Store, block_size: u64)
+        -> FSCache<Map, MapImpl, Store, StoreImpl>
+    {
         FSCache {
             map: RwLock::new(map),
             store: RwLock::new(store),
             block_size: block_size,
-            phantom1: PhantomData,
-            phantom2: PhantomData,
+            _p1: PhantomData,
+            _p2: PhantomData,
         }
     }
 
@@ -99,17 +114,27 @@ impl<M, S, X1, X2> FSCache<M, S, X1, X2>
         let mut store = self.store.write().unwrap();
 
         let map_path = (*map).borrow_mut().get_block_path(path, block);
-        let bucket_path = trylog!((*store).borrow_mut().put(&map_path, data, |map_path| (*map).borrow_mut().unmap_block(map_path).and(Ok(()))),
-                                  "failed to write to cache");
-        trylog!((*map).borrow_mut().put_block(path, block, &bucket_path),
-                "failed to map bucket {:?} into map for block {:?}/{}", bucket_path, path, block);
+        let bucket_path = trylog!(
+            (*store).borrow_mut().put(&map_path, data, |map_path| (*map)
+                .borrow_mut()
+                .unmap_block(map_path)
+                .and(Ok(()))),
+            "failed to write to cache");
+        trylog!(
+            (*map).borrow_mut().put_block(path, block, &bucket_path),
+            "failed to map bucket {:?} into map for block {:?}/{}",
+            bucket_path, path, block);
         Ok(())
     }
 }
 
-impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
-        where M: BorrowMut<X1>, X1: CacheBlockMap,
-              S: BorrowMut<X2>, X2: CacheBucketStore {
+impl<Map, MapImpl, Store, StoreImpl> Cache for FSCache<Map, MapImpl, Store, StoreImpl>
+where
+    Map: BorrowMut<MapImpl>,
+    MapImpl: CacheBlockMap,
+    Store: BorrowMut<StoreImpl>,
+    StoreImpl: CacheBucketStore,
+{
     fn init(&self) -> io::Result<()> {
         let mut map = self.map.write().unwrap();
         let mut store = self.store.write().unwrap();
@@ -128,18 +153,20 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
         let path: &Path = path.as_ref();
         debug!("invalidate_path: {:?}", path);
         let mut store = self.store.write().unwrap();
-        (*self.map.write().unwrap()).borrow_mut().invalidate_path(path.as_os_str(), |bucket_path| {
-            match (*store).borrow_mut().free_bucket(bucket_path) {
-                Ok(n) => {
-                    info!("freed {} bytes from bucket {:?}", n, bucket_path);
-                    Ok(())
-                },
-                Err(e) => {
-                    error!("error freeing bucket {:?}: {}", bucket_path, e);
-                    Err(e)
+        (*self.map.write().unwrap())
+            .borrow_mut()
+            .invalidate_path(path.as_os_str(), |bucket_path| {
+                match (*store).borrow_mut().free_bucket(bucket_path) {
+                    Ok(n) => {
+                        info!("freed {} bytes from bucket {:?}", n, bucket_path);
+                        Ok(())
+                    },
+                    Err(e) => {
+                        error!("error freeing bucket {:?}: {}", bucket_path, e);
+                        Err(e)
+                    }
                 }
-            }
-        })
+            })
     }
 
     fn free_orphaned_buckets(&self) -> io::Result<()> {
@@ -149,25 +176,27 @@ impl<M, S, X1, X2> Cache for FSCache<M, S, X1, X2>
 
         {
             let map_read = self.map.read().unwrap();
-            try!((*self.store.read().unwrap()).borrow().enumerate_buckets(|bucket_path, parent_opt| {
-                if let Some(parent) = parent_opt {
-                    if !try!((*map_read).borrow().is_block_mapped(parent)) {
-                        warn!("bucket {:?} is an orphan; it was parented to {:?}",
-                                 bucket_path, parent);
-                        orphans.push(PathBuf::from(bucket_path));
+            try!((*self.store.read().unwrap()).borrow().enumerate_buckets(
+                |bucket_path, parent_opt| {
+                    if let Some(parent) = parent_opt {
+                        if !try!((*map_read).borrow().is_block_mapped(parent)) {
+                            warn!("bucket {:?} is an orphan; it was parented to {:?}",
+                                  bucket_path, parent);
+                            orphans.push(PathBuf::from(bucket_path));
+                        }
                     }
+                    Ok(())
                 }
-                Ok(())
-            }));
+            ));
         }
 
         if !orphans.is_empty() {
             let mut store_write = self.store.write().unwrap();
             for bucket in orphans {
                 try!((*store_write).borrow_mut().free_bucket(bucket.as_os_str()));
-                // HACK: fscache shouldn't be managing these parent links; they're owned by the map.
-                // However, orphaned buckets only happen due to the map losing them somehow (usually
-                // intentionally by manual editing), so it can't manage them in this case.
+                // HACK: fscache shouldn't be managing these parent links; they're owned by the
+                // map. However, orphaned buckets only happen due to the map losing them somehow
+                // (usually intentionally by manual editing), so it can't manage them in this case.
                 fs::remove_file(bucket.join("parent")).unwrap();
             }
         }
