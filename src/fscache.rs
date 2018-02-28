@@ -6,7 +6,6 @@
 use std::borrow::BorrowMut;
 use std::ffi::OsStr;
 use std::fmt::Debug;
-use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
@@ -195,10 +194,6 @@ where
             let mut store_write = self.store.write().unwrap();
             for bucket in orphans {
                 (*store_write).borrow_mut().free_bucket(bucket.as_os_str())?;
-                // HACK: fscache shouldn't be managing these parent links; they're owned by the
-                // map. However, orphaned buckets only happen due to the map losing them somehow
-                // (usually intentionally by manual editing), so it can't manage them in this case.
-                fs::remove_file(bucket.join("parent")).unwrap();
             }
         }
 

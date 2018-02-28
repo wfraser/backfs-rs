@@ -343,6 +343,10 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
             }
         };
 
+        let parent_link = PathBuf::from(bucket_path).join("parent");
+        trylog!(fs::remove_file(&parent_link),
+                "unable to remove block parent link {:?}", parent_link);
+
         info!("freed {} bytes", data_size);
         self.used_bytes -= data_size;
         Ok(data_size)

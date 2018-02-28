@@ -129,7 +129,10 @@ impl CacheBlockMap for FSCacheBlockMap {
         let file_block = self.map_path(path).join(format!("{}", block));
         trylog!(link::makelink("", &file_block, Some(bucket_path)),
                 "error making map link from {:?} to {:?}", &file_block, bucket_path);
+
+        // this makes assumptions on the bucket store implementation
         debug_assert_eq!(link::getlink(bucket_path, "parent").unwrap(), Some(file_block));
+
         Ok(())
     }
 
@@ -149,14 +152,10 @@ impl CacheBlockMap for FSCacheBlockMap {
     fn unmap_block(&mut self, map_block_path: &OsStr) -> io::Result<()> {
         debug!("unmapping {:?}", &map_block_path);
 
-        let parent_link = PathBuf::from(map_block_path).join("parent");
-        trylog!(fs::remove_file(&parent_link),
-                "unable to remove block parent link {:?}", parent_link);
-
         trylog!(fs::remove_file(&map_block_path),
                 "unable to remove map block link {:?}", map_block_path);
 
-        // TODO: clean up parents
+        // TODO: check for and clean up empty parent directories in the map
 
         Ok(())
     }
