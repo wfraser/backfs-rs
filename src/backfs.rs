@@ -621,7 +621,7 @@ impl FilesystemMT for BackFS {
             if name == extra {
                 Ok(Xattr::Size(21)) // number of digits in 2^64, plus null byte
             } else {
-                let nbytes = try!(libc_wrappers::lgetxattr(real, name.to_owned(), &mut[]));
+                let nbytes = libc_wrappers::lgetxattr(real, name.to_owned(), &mut[])?;
                 Ok(Xattr::Size(nbytes as u32))
             }
         } else if name == extra {
@@ -632,7 +632,7 @@ impl FilesystemMT for BackFS {
         } else {
             let mut data = Vec::<u8>::with_capacity(size as usize);
             unsafe { data.set_len(size as usize) };
-            let nread = try!(libc_wrappers::lgetxattr(real, name.to_owned(), data.as_mut_slice()));
+            let nread = libc_wrappers::lgetxattr(real, name.to_owned(), data.as_mut_slice())?;
             data.truncate(nread);
             Ok(Xattr::Data(data))
         }

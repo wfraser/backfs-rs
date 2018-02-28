@@ -176,10 +176,11 @@ where
 
         {
             let map_read = self.map.read().unwrap();
-            try!((*self.store.read().unwrap()).borrow().enumerate_buckets(
+            let store_read = self.store.read().unwrap();
+            store_read.borrow().enumerate_buckets(
                 |bucket_path, parent_opt| {
                     if let Some(parent) = parent_opt {
-                        if !try!((*map_read).borrow().is_block_mapped(parent)) {
+                        if !(*map_read).borrow().is_block_mapped(parent)? {
                             warn!("bucket {:?} is an orphan; it was parented to {:?}",
                                   bucket_path, parent);
                             orphans.push(PathBuf::from(bucket_path));
@@ -187,13 +188,13 @@ where
                     }
                     Ok(())
                 }
-            ));
+            )?;
         }
 
         if !orphans.is_empty() {
             let mut store_write = self.store.write().unwrap();
             for bucket in orphans {
-                try!((*store_write).borrow_mut().free_bucket(bucket.as_os_str()));
+                (*store_write).borrow_mut().free_bucket(bucket.as_os_str())?;
                 // HACK: fscache shouldn't be managing these parent links; they're owned by the
                 // map. However, orphaned buckets only happen due to the map losing them somehow
                 // (usually intentionally by manual editing), so it can't manage them in this case.
@@ -232,7 +233,7 @@ where
             let mut map = self.map.write().unwrap();
             while let Err(e) = (*map).borrow_mut().set_file_mtime(path, mtime) {
                 if e.raw_os_error() == Some(::libc::ENOSPC) {
-                    try!((*store).borrow_mut().delete_something());
+                    (*store).borrow_mut().delete_something()?;
                 } else {
                     error!("failed to set mtime file {:?}: {}", path, e);
                     return Err(e);
@@ -273,9 +274,9 @@ where
                     }
 
                     // TODO: skip this when doing contiguous reads from the file
-                    try!(file.seek(SeekFrom::Start(block * self.block_size)));
+                    file.seek(SeekFrom::Start(block * self.block_size))?;
 
-                    let nread = try!(file.read(&mut buf[..])) as u64;
+                    let nread = file.read(&mut buf[..])? as u64;
                     debug!("read {:#x} bytes", nread);
 
                     if nread != self.block_size {
@@ -359,7 +360,7 @@ where
         let map = self.map.read().unwrap();
         let store = self.store.read().unwrap();
         if let Err(e) = (*map).borrow().for_each_block_under_path(path, |block_path| {
-            sum += try!((*store).borrow().get_size(block_path));
+            sum += (*store).borrow().get_size(block_path)?;
             Ok(())
         }) {
             error!("failed to count cached bytes under {:?}: {}", path, e);

@@ -121,7 +121,7 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
     fn compute_cache_used_size(&mut self) -> io::Result<u64> {
         let mut size = 0u64;
 
-        try!(self.for_each_bucket(|bucket_path| {
+        self.for_each_bucket(|bucket_path| {
             let path = PathBuf::from(bucket_path).join("data");
 
             let len = match fs::File::open(&path) {
@@ -141,7 +141,7 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
 
             size += len;
             Ok(())
-        }));
+        })?;
 
         info!("cache used size: {} bytes", size);
 
@@ -155,8 +155,8 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
         } else {
             let free_bucket: PathBuf = self.free_list.get_tail().unwrap();
             debug!("re-using free bucket {:?}", free_bucket);
-            try!(self.free_list.disconnect(&free_bucket));
-            try!(self.used_list.insert_as_head(&free_bucket));
+            self.free_list.disconnect(&free_bucket)?;
+            self.used_list.insert_as_head(&free_bucket)?;
             Ok(free_bucket)
         }
     }
@@ -186,7 +186,7 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
 impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
     fn init<F>(&mut self, mut delete_handler: F) -> io::Result<()>
             where F: FnMut(&OsStr) -> io::Result<()> {
-        self.next_bucket_number = try!(self.read_next_bucket_number());
+        self.next_bucket_number = self.read_next_bucket_number()?;
         info!("next bucket number: {}", self.next_bucket_number);
 
         match utils::read_number_file(&PathBuf::from(&self.buckets_dir).join("bucket_size"),
@@ -209,12 +209,12 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
             Ok(None) => unreachable!()
         }
 
-        self.used_bytes = try!(self.compute_cache_used_size());
+        self.used_bytes = self.compute_cache_used_size()?;
 
         if self.max_bytes.is_some() && self.used_bytes > self.max_bytes.unwrap() {
             warn!("cache is over-size; freeing buckets until it is within limits");
             while self.used_bytes > self.max_bytes.unwrap() {
-                let (map_path, _) = try!(self.delete_something());
+                let (map_path, _) = self.delete_something()?;
                 trylog!(delete_handler(&map_path),
                         "delete handler returned error");
             }
@@ -384,21 +384,21 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
     fn enumerate_buckets<F>(&self, mut handler: F) -> io::Result<()>
             where F: FnMut(&OsStr, Option<&OsStr>) -> io::Result<()> {
 
-        try!(self.for_each_bucket(|bucket_path| {
+        self.for_each_bucket(|bucket_path| {
             let parent_opt = trylog!(link::getlink(bucket_path, "parent"),
                                      "Failed to read parent link for {:?}", bucket_path);
             let parent_osstr_opt = parent_opt.as_ref().map(|x| x.as_ref());
             trylog!(handler(bucket_path, parent_osstr_opt),
                     "enumerate_buckets: handler returned");
             Ok(())
-        }));
+        })?;
 
         Ok(())
     }
 
     fn get_size(&self, bucket_path: &OsStr) -> io::Result<u64> {
         let data_path = PathBuf::from(bucket_path).join("data");
-        let metadata = try!(fs::metadata(&data_path));
+        let metadata = fs::metadata(&data_path)?;
         Ok(metadata.len())
     }
 }

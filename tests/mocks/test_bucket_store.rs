@@ -139,7 +139,7 @@ impl CacheBucketStore for TestBucketStore {
         let bucket_result: io::Result<&TestBucket> = self.buckets
             .get(number)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "bucket not found"));
-        try!(bucket_result).data
+        bucket_result?.data
             .as_ref()
             .map_or(Ok(0), |data| Ok(data.len() as u64))
     }

@@ -139,7 +139,7 @@ impl CacheBlockMap for FSCacheBlockMap {
 
     fn invalidate_path<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
             where F: FnMut(&OsStr) -> io::Result<()> {
-        try!(self.for_each_block_under_path(path, f));
+        self.for_each_block_under_path(path, f)?;
         let map_path = self.map_path(path);
         trylog!(fs::remove_dir_all(&map_path),
                 "Error removing map path {:?}", map_path);

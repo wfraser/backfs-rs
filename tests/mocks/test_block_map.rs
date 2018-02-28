@@ -122,7 +122,7 @@ impl CacheBlockMap for TestMap {
             if cached_path == path || cached_path.starts_with(&check_path) {
                 for block in map_data.blocks.keys() {
                     let block_path = self.get_block_path(cached_path, *block);
-                    try!(handler(&block_path));
+                    handler(&block_path)?;
                 }
             }
         }
