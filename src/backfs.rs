@@ -58,6 +58,7 @@ pub struct BackFS {
     pub settings: BackfsSettings,
     fscache: FSCache<FSCacheBlockMap, FSCacheBlockMap,
                      FSCacheBucketStore<FSLL>, FSCacheBucketStore<FSLL>>,
+    uid: u32,
 }
 
 fn is_backfs_fake_file(path: &Path) -> bool {
@@ -70,17 +71,19 @@ fn backfs_version_str() -> String {
             super::VERSION, super::GIT_REVISION, ::fuse_mt::VERSION)
 }
 
-fn backfs_fake_file_attr(path: Option<&str>) -> Option<FileAttr> {
+fn backfs_fake_file_attr(path: Option<&str>, uid: u32) -> Option<FileAttr> {
     match path {
         Some(BACKFS_CONTROL_FILE_PATH) => {
             let mut attr = BACKFS_FAKE_FILE_ATTRS;
             attr.perm = 0o600; // -rw-------
+            attr.uid = uid;
             attr.size = BACKFS_CONTROL_FILE_HELP.as_bytes().len() as u64;
             Some(attr)
         },
         Some(BACKFS_VERSION_FILE_PATH) => {
             let mut attr = BACKFS_FAKE_FILE_ATTRS;
             attr.perm = 0o444; // -r--r--r--
+            attr.uid = uid;
             attr.size = backfs_version_str().as_bytes().len() as u64;
             Some(attr)
         },
@@ -165,9 +168,13 @@ impl BackFS {
         let store = FSCacheBucketStore::new(buckets_dir.clone(), used_list, free_list,
                                             settings.block_size, max_bytes);
 
+        let uid = unsafe { libc::getuid() };
+        debug!("uid = {}", uid);
+
         BackFS {
             fscache: FSCache::new(map, store, settings.block_size),
-            settings: settings,
+            settings,
+            uid,
         }
     }
 
@@ -328,7 +335,7 @@ impl FilesystemMT for BackFS {
     fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
         debug!("getattr: {:?}", path);
 
-        if let Some(attr) = backfs_fake_file_attr(path.to_str()) {
+        if let Some(attr) = backfs_fake_file_attr(path.to_str(), self.uid) {
             return Ok((TTL, attr));
         }
 
