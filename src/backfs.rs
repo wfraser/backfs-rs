@@ -260,6 +260,22 @@ impl BackFS {
             "invalidate" => {
                 let _ignore_errors = self.fscache.invalidate_path(arg);
             },
+            "free_block" => {
+                let path_and_block = Path::new(arg);
+                let path = path_and_block.parent()
+                    .ok_or_else(|| { warn!("bad path: no parent"); libc::EINVAL })?;
+                let block: u64 = path_and_block.file_name()
+                    .ok_or_else(|| { warn!("no filename given"); libc::EINVAL })?
+                    .to_str()
+                    .ok_or_else(|| { warn!("bad UTF-8"); libc::EINVAL })?
+                    .parse()
+                    .map_err(|e| { warn!("doesn't end in a valid number: {}", e); libc::EINVAL })?;
+                match self.fscache.free_block(path.as_os_str(), block) {
+                    Ok(Some(n)) => debug!("{:?}/{}: {} bytes freed", path, block, n),
+                    Ok(None) => debug!("{:?}/{} file or block not found", path, block),
+                    Err(e) => error!("error freeing block {} of {:?}: {}", block, path, e),
+                }
+            },
             "free_orphans" => {
                 let _ignore_errors = self.fscache.free_orphaned_buckets();
             },

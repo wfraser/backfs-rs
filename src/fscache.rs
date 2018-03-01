@@ -125,6 +125,23 @@ where
             bucket_path, path, block);
         Ok(())
     }
+
+    pub fn free_block(&self, path: &OsStr, block: u64)
+        -> io::Result<Option<u64>>
+    {
+        debug!("free_block({:?}, {})", path, block);
+        let mut map = self.map.write().unwrap();
+        let mut store = self.store.write().unwrap();
+        let block_path = (*map).borrow().get_block_path(path, block);
+        let bucket_path = (*map).borrow().get_block(path, block)?;
+        if let Some(bucket_path) = bucket_path {
+            let freed = (*store).borrow_mut().free_bucket(&bucket_path);
+            (*map).borrow_mut().unmap_block(&block_path)?;
+            freed.map(Some)
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 impl<Map, MapImpl, Store, StoreImpl> Cache for FSCache<Map, MapImpl, Store, StoreImpl>

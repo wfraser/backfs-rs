@@ -97,6 +97,21 @@ impl FSCacheBlockMap {
         }
         Ok(())
     }
+
+    fn has_any_blocks(path: &Path) -> io::Result<bool> {
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            if &name == "." || &name == ".." {
+                continue;
+            }
+            if &name == "mtime" && entry.file_type()?.is_file() {
+                continue;
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
 }
 
 impl CacheBlockMap for FSCacheBlockMap {
@@ -176,6 +191,21 @@ impl CacheBlockMap for FSCacheBlockMap {
 
         let mut parent = PathBuf::from(map_block_path);
         parent.pop();
+
+        let has_any_blocks = Self::has_any_blocks(&parent)
+            .unwrap_or_else(|e| {
+                error!("error checking {:?} for any blocks: {}", parent, e);
+                false
+            });
+        if !has_any_blocks {
+            let mtime = parent.join("mtime");
+            if let Err(e) = fs::remove_file(&mtime) {
+                if e.raw_os_error() != Some(libc::ENOENT) {
+                    warn!("error removing mtime file {:?}: {}", mtime, e);
+                }
+            }
+        }
+
         self.prune_empty_directories(parent)?;
         Ok(())
     }
