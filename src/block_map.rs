@@ -58,19 +58,17 @@ pub trait CacheBlockMap {
 }
 
 pub struct FSCacheBlockMap {
-    map_dir: OsString,
+    map_dir: PathBuf,
 }
 
 impl FSCacheBlockMap {
     pub fn new(map_dir: OsString) -> FSCacheBlockMap {
         FSCacheBlockMap {
-            map_dir: map_dir,
+            map_dir: PathBuf::from(map_dir),
         }
     }
 
     fn map_path(&self, path: &OsStr) -> PathBuf {
-        let mut map_path = PathBuf::from(&self.map_dir);
-
         let path: &Path = Path::new(path);
         let relative_path: &Path = if path.is_absolute() {
             path.strip_prefix("/").unwrap()
@@ -78,10 +76,27 @@ impl FSCacheBlockMap {
             path
         };
 
-        map_path.push(relative_path);
-        map_path
+        self.map_dir.join(relative_path)
     }
 
+    fn prune_empty_directories(&self, mut start: PathBuf) -> io::Result<()> {
+        loop {
+            if let Err(e) = fs::remove_dir(&start) {
+                if e.raw_os_error() == Some(libc::ENOTEMPTY) {
+                    break;
+                } else {
+                    error!("error pruning map directory {:?}: {}", start, e);
+                    return Err(e);
+                }
+            }
+            debug!("pruned empty map directory {:?}", start);
+            start.pop();
+            if start == self.map_dir {
+                break;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl CacheBlockMap for FSCacheBlockMap {
@@ -143,9 +158,13 @@ impl CacheBlockMap for FSCacheBlockMap {
     fn invalidate_path<F>(&mut self, path: &OsStr, f: F) -> io::Result<()>
             where F: FnMut(&OsStr) -> io::Result<()> {
         self.for_each_block_under_path(path, f)?;
-        let map_path = self.map_path(path);
+
+        let mut map_path = self.map_path(path);
         trylog!(fs::remove_dir_all(&map_path),
                 "Error removing map path {:?}", map_path);
+
+        map_path.pop();
+        self.prune_empty_directories(map_path)?;
         Ok(())
     }
 
@@ -155,8 +174,9 @@ impl CacheBlockMap for FSCacheBlockMap {
         trylog!(fs::remove_file(&map_block_path),
                 "unable to remove map block link {:?}", map_block_path);
 
-        // TODO: check for and clean up empty parent directories in the map
-
+        let mut parent = PathBuf::from(map_block_path);
+        parent.pop();
+        self.prune_empty_directories(parent)?;
         Ok(())
     }
 
