@@ -5,8 +5,6 @@
 
 #![allow(unknown_lints)]
 
-#![allow(unit_expr)] // https://github.com/rust-lang-nursery/rust-clippy/issues/2095
-
 extern crate backfs;
 use backfs::BackFS;
 use backfs::arg_parse::{self, BackfsSettings};

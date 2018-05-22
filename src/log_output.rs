@@ -21,7 +21,7 @@ pub fn init(global_filter: log::LevelFilter,
 {
     log::set_max_level(global_filter);
 
-    let maybe_syslog = if use_syslog {
+    let syslog = if use_syslog {
         match syslog::unix(Facility::LOG_USER) {
             Ok(writer) => Some(writer),
             Err(e) => {
@@ -35,9 +35,9 @@ pub fn init(global_filter: log::LevelFilter,
     };
 
     log::set_boxed_logger(Box::new(Log {
-        global_filter: global_filter,
-        target_filter: target_filter,
-        syslog: maybe_syslog,
+        global_filter,
+        target_filter,
+        syslog,
     }))
 }
 

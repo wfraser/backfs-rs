@@ -66,11 +66,11 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
     pub fn new(buckets_dir: OsString, used_list: LL, free_list: LL, block_size: u64, max_bytes: Option<u64>)
             -> FSCacheBucketStore<LL> {
         FSCacheBucketStore {
-            buckets_dir: buckets_dir,
-            used_list: used_list,
-            free_list: free_list,
+            buckets_dir,
+            used_list,
+            free_list,
             used_bytes: 0,
-            max_bytes: max_bytes,
+            max_bytes,
             bucket_size: block_size,
             next_bucket_number: 0,
         }

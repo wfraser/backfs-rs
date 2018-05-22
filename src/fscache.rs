@@ -77,7 +77,7 @@ where
         FSCache {
             map: RwLock::new(map),
             store: RwLock::new(store),
-            block_size: block_size,
+            block_size,
             _p1: PhantomData,
             _p2: PhantomData,
         }

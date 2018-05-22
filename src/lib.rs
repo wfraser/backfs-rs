@@ -6,9 +6,6 @@
 // Silence unhelpful clippy lints.
 #![allow(unknown_lints, cast_lossless)]
 
-// buggy clippy lints
-#![allow(unit_expr)] // https://github.com/rust-lang-nursery/rust-clippy/issues/2095
-
 extern crate daemonize;
 extern crate fuse_mt;
 extern crate libc;

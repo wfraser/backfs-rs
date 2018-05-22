@@ -224,7 +224,7 @@ impl BackFS {
             mtime: Timespec { sec: stat.st_mtime as i64, nsec: stat.st_mtime_nsec as i32 },
             ctime: Timespec { sec: stat.st_ctime as i64, nsec: stat.st_ctime_nsec as i32 },
             crtime: Timespec { sec: 0, nsec: 0 },
-            kind: kind,
+            kind,
             perm: mode as u16,
             nlink: stat.st_nlink as u32,
             uid: stat.st_uid,
@@ -445,7 +445,7 @@ impl FilesystemMT for BackFS {
 
                     debug!("readdir: adding entry {:?} of type {:?}", name, filetype);
                     entries.push(DirectoryEntry {
-                        name: name,
+                        name,
                         kind: filetype,
                     });
                 },
