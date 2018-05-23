@@ -27,7 +27,7 @@ BackFS Options:
                             as the first non-option argument)
     -o cache_size       Maximum size for the cache (default is for the cache to
                             grow to fill the device it is on)
-    -o rw               Be a read-write cache (default is read-only)
+    -o rw               (experimental) Be a read-write cache (default is read-only)
     -o block_size       Cache block size. Defaults to 128K
     -v --verbose        Enable all debugging messages
        -o verbose

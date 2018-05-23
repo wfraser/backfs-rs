@@ -136,6 +136,14 @@ fn main() {
             log_output::init(log::LevelFilter::Warn, vec![], !settings.foreground)
         }.unwrap();
 
+        if settings.rw {
+            // Print a big scary warning to stderr
+            eprintln!("####################################");
+            eprintln!("#                                  #");
+            eprintln!("# ENABLING EXPERIMENTAL R/W MODE!! #");
+            eprintln!("#                                  #");
+            eprintln!("####################################");
+        }
 
         if !settings.foreground {
             // If we're forking to the background, we need to make sure any panics get sent to
