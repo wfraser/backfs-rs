@@ -42,7 +42,7 @@ pub fn init(global_filter: log::LevelFilter,
 }
 
 fn loglevel_to_syslog_severity(level: log::Level) -> Severity {
-    #[allow(match_same_arms)]
+    #[allow(clippy::match_same_arms)]
     match level {
         log::Level::Error => Severity::LOG_ERR,
         log::Level::Warn  => Severity::LOG_WARNING,

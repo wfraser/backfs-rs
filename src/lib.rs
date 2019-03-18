@@ -4,7 +4,7 @@
 //
 
 // Silence unhelpful clippy lints.
-#![allow(unknown_lints, cast_lossless)]
+#![allow(clippy::cast_lossless)]
 
 extern crate daemonize;
 extern crate fuse_mt;
@@ -30,7 +30,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 // These files are produced by build.rs
 pub const GIT_REVISION: &str = include_str!(concat!(env!("OUT_DIR"), "/git_rev.txt"));
 
-#[allow(unreadable_literal)]
+#[allow(clippy::unreadable_literal)]
 pub const BUILD_TIME: i64 = include!(concat!(env!("OUT_DIR"), "/build_time.txt"));
 
 pub use backfs::BackFS;

@@ -244,7 +244,7 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
         }
     }
 
-    #[allow(cyclomatic_complexity)] // the retry loops really blow this up
+    #[allow(clippy::cyclomatic_complexity)] // the retry loops really blow this up
     fn put<F>(&mut self, parent: &OsStr, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
             where F: FnMut(&OsStr) -> io::Result<()>
     {

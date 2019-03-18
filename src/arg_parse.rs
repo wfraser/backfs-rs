@@ -54,13 +54,13 @@ pub struct BackfsSettings {
 
 fn parse_human_number(s: &str) -> Result<u64, <u64 as FromStr>::Err> {
     let (multiplier, s) = if s.ends_with('T') {
-        (1024 * 1024 * 1024 * 1024, s.trim_right_matches('T'))
+        (1024 * 1024 * 1024 * 1024, s.trim_end_matches('T'))
     } else if s.ends_with('G') {
-        (1024 * 1024 * 1024, s.trim_right_matches('G'))
+        (1024 * 1024 * 1024, s.trim_end_matches('G'))
     } else if s.ends_with('M') {
-        (1024 * 1024, s.trim_right_matches('M'))
+        (1024 * 1024, s.trim_end_matches('M'))
     } else if s.ends_with('K') {
-        (1024, s.trim_right_matches('K'))
+        (1024, s.trim_end_matches('K'))
     } else {
         (1, s)
     };

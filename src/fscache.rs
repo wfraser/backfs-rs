@@ -58,9 +58,8 @@ pub trait Cache {
     fn max_size(&self) -> Option<u64>;
     fn invalidate_path<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()>;
     fn free_orphaned_buckets(&self) -> io::Result<()>;
-    fn fetch<F>(&self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
-        -> io::Result<Vec<u8>>
-        where F: Read + Seek;
+    fn fetch<F: Read + Seek>(&self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
+        -> io::Result<Vec<u8>>;
     fn count_cached_bytes(&self, path: &OsStr) -> u64;
 }
 
@@ -217,11 +216,11 @@ where
         Ok(())
     }
 
-    #[allow(cyclomatic_complexity)] // FIXME: split this up into smaller pieces
+    #[allow(clippy::cyclomatic_complexity)] // FIXME: split this up into smaller pieces
     fn fetch<F>(&self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
             -> io::Result<Vec<u8>>
-            where F: Read + Seek {
-
+            where F: Read + Seek
+    {
         let freshness = {
             trylog!((*self.map.read().unwrap()).borrow().check_file_mtime(path, mtime),
                     "error checking cache freshness for {:?}", path)
@@ -260,7 +259,7 @@ where
 
         let mut result: Vec<u8> = Vec::with_capacity(size as usize);
 
-        for block in first_block..(last_block + 1) {
+        for block in first_block ..= last_block {
             debug!("fetching block {}", block);
 
             let mut block_data: Vec<u8> = match self.try_get_cached_block(path, block) {
