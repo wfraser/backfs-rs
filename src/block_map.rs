@@ -240,11 +240,12 @@ impl CacheBlockMap for FSCacheBlockMap {
                 },
                 Err(e) => {
                     let is_start = e.path() == Some(&map_path);
-                    let ioerr = io::Error::from(e);
-                    if is_start && ioerr.raw_os_error() == Some(libc::ENOENT) {
+                    let os_err = e.io_error().and_then(|e| e.raw_os_error());
+                    if is_start && os_err == Some(libc::ENOENT) {
                         // If the map directory doesn't exist, there's nothing to do.
                         return Ok(())
                     } else {
+                        let ioerr = io::Error::from(e);
                         error!("for_each_block_under_path: error reading directory entry from {:?}: {}",
                                map_path, ioerr);
                         return Err(ioerr)
