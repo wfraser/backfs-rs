@@ -389,11 +389,10 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
             where F: FnMut(&OsStr, Option<&OsStr>) -> io::Result<()> {
 
         self.for_each_bucket(|bucket_path| {
-            let parent_opt = trylog!(link::getlink(bucket_path, "parent"),
-                                     "Failed to read parent link for {:?}", bucket_path);
-            let parent_osstr_opt = parent_opt.as_ref().map(|x| x.as_ref());
-            trylog!(handler(bucket_path, parent_osstr_opt),
-                    "enumerate_buckets: handler returned");
+            let parent_opt: Option<PathBuf> = trylog!(link::getlink(bucket_path, "parent"),
+                    "Failed to read parent link for {:?}", bucket_path);
+            let parent_osstr_opt: Option<&OsStr> = parent_opt.as_ref().map(AsRef::as_ref);
+            trylog!(handler(bucket_path, parent_osstr_opt), "enumerate_buckets: handler returned");
             Ok(())
         })?;
 

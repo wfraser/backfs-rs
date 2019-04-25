@@ -240,7 +240,7 @@ impl CacheBlockMap for FSCacheBlockMap {
                 },
                 Err(e) => {
                     let is_start = e.path() == Some(&map_path);
-                    let os_err = e.io_error().and_then(|e| e.raw_os_error());
+                    let os_err = e.io_error().and_then(io::Error::raw_os_error);
                     if is_start && os_err == Some(libc::ENOENT) {
                         // If the map directory doesn't exist, there's nothing to do.
                         return Ok(())
