@@ -508,7 +508,7 @@ impl FilesystemMT for BackFS {
         }
     }
 
-    fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
+    fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32, result: impl FnOnce(Result<&[u8], libc::c_int>)) {
         debug!("read: {:?} {:#x} @ {:#x}", path, size, offset);
 
         let fake_data: Option<Vec<u8>> = match path.to_str() {
@@ -517,18 +517,17 @@ impl FilesystemMT for BackFS {
             _ => None
         };
 
-        if let Some(mut data) = fake_data {
+        if let Some(data) = fake_data {
             if offset as usize >= data.len() {
                 // Request out of range; return empty result.
-                return Ok(vec![]);
+                result(Ok(&[]));
             } else {
                 let offset = offset as usize;
                 let size = size as usize;
                 let end = cmp::min(data.len(), offset + size);
-                data = data.split_off(offset);
-                data.truncate(end - offset);
-                return Ok(data);
+                result(Ok(&data[offset .. end]));
             }
+            return;
         }
 
         let mut real_file = unsafe { File::from_raw_fd(fh as libc::c_int) };
@@ -537,24 +536,23 @@ impl FilesystemMT for BackFS {
             Ok(metadata) => metadata.mtime() as i64,
             Err(e) => {
                 error!("unable to get metadata from {:?}: {}", path, e);
-                return Err(e.raw_os_error().unwrap());
+                result(Err(e.raw_os_error().unwrap()));
+                return;
             }
         };
 
-        let result = match self.fscache.fetch(path.as_os_str(), offset, size as u64, &mut real_file, mtime) {
+        match self.fscache.fetch(path.as_os_str(), offset, size as u64, &mut real_file, mtime) {
             Ok(data) => {
-                Ok(data)
+                result(Ok(&data));
             },
             Err(e) => {
-                Err(e.raw_os_error().unwrap())
+                result(Err(e.raw_os_error().unwrap()));
             }
         };
 
         // Release control of the file descriptor, so it is not closed when this function
         // returns.
         real_file.into_raw_fd();
-
-        result
     }
 
     fn write(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
