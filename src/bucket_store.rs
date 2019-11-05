@@ -98,7 +98,7 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
                 continue;
             }
 
-            match entry.file_name().to_str().and_then(|name| Some(name.parse::<u64>())) {
+            match entry.file_name().to_str().map(|name| name.parse::<u64>()) {
                 Some(Err(_)) | None => {
                     // folder name doesn't parse as a number: must not be a bucket. Skip it.
                     continue;
@@ -229,7 +229,7 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
 
         let data_path = PathBuf::from(bucket_path).join("data");
         let mut block_file: File = trylog!(File::open(&data_path),
-            "cached_block error opening bucket data file {:?}", data_path);;
+            "cached_block error opening bucket data file {:?}", data_path);
 
         let mut data: Vec<u8> = Vec::with_capacity(self.bucket_size as usize);
         match block_file.read_to_end(&mut data) {
@@ -244,7 +244,7 @@ impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
         }
     }
 
-    #[allow(clippy::cyclomatic_complexity)] // the retry loops really blow this up
+    #[allow(clippy::cognitive_complexity)] // the retry loops really blow this up
     fn put<F>(&mut self, parent: &OsStr, data: &[u8], mut delete_handler: F) -> io::Result<OsString>
             where F: FnMut(&OsStr) -> io::Result<()>
     {

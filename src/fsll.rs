@@ -35,13 +35,11 @@ pub trait PathLinkedList {
 }
 
 impl FSLL {
-    pub fn new<T: AsRef<OsStr> + ?Sized,
-               U: AsRef<OsStr> + ?Sized,
-               V: AsRef<OsStr> + ?Sized>(
-        base_dir: &T,
-        head_link: &U,
-        tail_link: &V
-    ) -> FSLL {
+    pub fn new<P1, P2, P3>(base_dir: &P1, head_link: &P2, tail_link: &P3) -> Self
+        where P1: AsRef<OsStr> + ?Sized,
+              P2: AsRef<OsStr> + ?Sized,
+              P3: AsRef<OsStr> + ?Sized,
+    {
         FSLL {
             base_dir: OsString::from(base_dir),
             head_link: OsString::from(head_link),
@@ -49,12 +47,10 @@ impl FSLL {
         }
     }
 
-    fn getlink<T: AsRef<Path> + ?Sized + Debug,
-               U: AsRef<Path> + ?Sized + Debug>(
-                   &self,
-                   path: &T,
-                   link: &U
-               ) -> io::Result<Option<PathBuf>> {
+    fn getlink<P1, P2>(&self, path: &P1, link: &P2) -> io::Result<Option<PathBuf>>
+        where P1: AsRef<Path> + ?Sized + Debug,
+              P2: AsRef<Path> + ?Sized + Debug,
+    {
         match link::getlink(path, link) {
             Ok(None) => Ok(None),
             Ok(Some(result)) => {
@@ -68,26 +64,21 @@ impl FSLL {
         }
     }
 
-    fn makelink<T: AsRef<Path> + ?Sized + Debug,
-                U: AsRef<Path> + ?Sized + Debug,
-                V: AsRef<Path> + ?Sized + Debug>(
-                    &self,
-                    path: &T,
-                    link: &U,
-                    target: Option<&V>
-                ) -> io::Result<()> {
+    fn makelink<P1, P2, P3>(&self, path: &P1, link: &P2, target: Option<&P3>) -> io::Result<()>
+        where P1: AsRef<Path> + ?Sized + Debug,
+              P2: AsRef<Path> + ?Sized + Debug,
+              P3: AsRef<Path> + ?Sized + Debug,
+    {
         debug!("makelink: {:?}: {:?} -> {:?}", path, link, target);
-        match link::makelink(path, link, target) {
-            Ok(()) => Ok(()),
-            Err(e) => {
+        link::makelink(path, link, target)
+            .map_err(|e| {
                 if target.is_none() {
                     error!("error removing link {:?}/{:?}: {}", path, link, e);
                 } else {
                     error!("error creating link {:?}/{:?}: {}", path, link, e);
                 }
-                Err(e)
-            }
-        }
+                e
+            })
     }
 
     fn get_head_tail(&self, method_name: &str) -> io::Result<(PathBuf, PathBuf)> {
@@ -152,23 +143,17 @@ impl PathLinkedList for FSLL {
             error_ret!("entry points to itself as prev: {:?}", path);
         }
 
-        match prev.as_ref() {
-            Some(p) => {
-                self.makelink(p, Path::new("next"), next.as_ref())?;
-            },
-            None => {
-                // already head; we're done!
-                return Ok(());
-            }
+        if let Some(ref p) = prev {
+            self.makelink(p, Path::new("next"), next.as_ref())?;
+        } else {
+            // already head; we're done!
+            return Ok(());
         }
 
-        match next.as_ref() {
-            Some(p) => {
-                self.makelink(p, Path::new("prev"), prev.as_ref())?;
-            },
-            None => {
-                self.makelink(&self.base_dir, &self.tail_link, prev.as_ref())?;
-            }
+        if let Some(ref p) = next {
+            self.makelink(p, Path::new("prev"), prev.as_ref())?;
+        } else {
+            self.makelink(&self.base_dir, &self.tail_link, prev.as_ref())?;
         }
 
         // assuming head != None
@@ -185,21 +170,25 @@ impl PathLinkedList for FSLL {
         let maybe_head = self.getlink(&self.base_dir, &self.head_link)?;
         let maybe_tail = self.getlink(&self.base_dir, &self.tail_link)?;
 
-        if maybe_head.is_some() && maybe_tail.is_some() {
-            let head = maybe_head.as_ref().unwrap();
-            self.makelink(path, Path::new("next"), Some(head))?;
-            self.makelink(head, Path::new("prev"), Some(path))?;
-            self.makelink(&self.base_dir, &self.head_link, Some(path))?;
-        } else if maybe_head.is_none() && maybe_tail.is_none() {
-            debug!("inserting {:?} as head and tail", path);
-            self.makelink(&self.base_dir, &self.head_link, Some(path))?;
-            self.makelink(&self.base_dir, &self.tail_link, Some(path))?;
-            self.makelink(path, Path::new("next"), None::<&Path>)?;
-            self.makelink(path, Path::new("prev"), None::<&Path>)?;
-        } else if maybe_head.is_some() {
-            error_ret!("list has a head {:?} but no tail!", maybe_head.unwrap());
-        } else {
-            error_ret!("list has a tail {:?} but no head!", maybe_tail.unwrap());
+        match (maybe_head, maybe_tail) {
+            (Some(ref head), Some(ref _tail)) => {
+                self.makelink(path, Path::new("next"), Some(head))?;
+                self.makelink(head, Path::new("prev"), Some(path))?;
+                self.makelink(&self.base_dir, &self.head_link, Some(path))?;
+            }
+            (None, None) => {
+                debug!("inserting {:?} as head and tail", path);
+                self.makelink(&self.base_dir, &self.head_link, Some(path))?;
+                self.makelink(&self.base_dir, &self.tail_link, Some(path))?;
+                self.makelink(path, Path::new("next"), None::<&Path>)?;
+                self.makelink(path, Path::new("prev"), None::<&Path>)?;
+            }
+            (Some(head), None) => {
+                error_ret!("list has a head {:?} but no tail!", head);
+            }
+            (None, Some(tail)) => {
+                error_ret!("list has a tail {:?} but no head!", tail);
+            }
         }
 
         Ok(())
@@ -209,20 +198,24 @@ impl PathLinkedList for FSLL {
         let maybe_head = self.getlink(&self.base_dir, &self.head_link)?;
         let maybe_tail = self.getlink(&self.base_dir, &self.tail_link)?;
 
-        if maybe_head.is_some() && maybe_tail.is_some() {
-            let tail = maybe_tail.as_ref().unwrap();
-            self.makelink(path, Path::new("prev"), Some(tail))?;
-            self.makelink(tail, Path::new("next"), Some(path))?;
-            self.makelink(&self.base_dir, &self.tail_link, Some(path))?;
-        } else if maybe_head.is_none() && maybe_tail.is_none() {
-            self.makelink(&self.base_dir, &self.head_link, Some(path))?;
-            self.makelink(&self.base_dir, &self.tail_link, Some(path))?;
-            self.makelink(path, Path::new("next"), None::<&Path>)?;
-            self.makelink(path, Path::new("prev"), None::<&Path>)?;
-        } else if maybe_head.is_some() {
-            error_ret!("list has a head {:?} but no tail!", maybe_head.unwrap());
-        } else {
-            error_ret!("list has a tail {:?} but no head!", maybe_tail.unwrap());
+        match (maybe_head, maybe_tail) {
+            (Some(ref _head), Some(ref tail)) => {
+                self.makelink(path, Path::new("prev"), Some(tail))?;
+                self.makelink(tail, Path::new("next"), Some(path))?;
+                self.makelink(&self.base_dir, &self.tail_link, Some(path))?;
+            }
+            (None, None) => {
+                self.makelink(&self.base_dir, &self.head_link, Some(path))?;
+                self.makelink(&self.base_dir, &self.tail_link, Some(path))?;
+                self.makelink(path, Path::new("next"), None::<&Path>)?;
+                self.makelink(path, Path::new("prev"), None::<&Path>)?;
+            }
+            (Some(head), None) => {
+                error_ret!("list has a head {:?} but no tail!", head);
+            }
+            (None, Some(tail)) => {
+                error_ret!("list has a tail {:?} but no head!", tail);
+            }
         }
 
         Ok(())
@@ -236,38 +229,34 @@ impl PathLinkedList for FSLL {
         let prev = self.getlink(path, Path::new("prev"))?;
 
         if head == p {
-            if next.is_none() {
-                if tail == p {
-                    self.makelink(&self.base_dir, &self.tail_link, None::<&Path>)?;
-                } else {
-                    error_ret!("entry has no next but is not tail: {:?}", path);
-                }
+            if let Some(ref next) = next {
+                self.makelink(&self.base_dir, &self.head_link, Some(next))?;
+                self.makelink(next, Path::new("prev"), None::<&Path>)?;
+            } else if tail == p {
+                self.makelink(&self.base_dir, &self.tail_link, None::<&Path>)?;
             } else {
-                self.makelink(&self.base_dir, &self.head_link, next.as_ref())?;
-                self.makelink(next.as_ref().unwrap(), Path::new("prev"), None::<&Path>)?;
+                error_ret!("entry has no next but is not tail: {:?}", path);
             }
         } else if prev.is_none() {
             error_ret!("entry has no prev but is not head: {:?}", path);
         }
 
         if tail == p {
-            if prev.is_none() {
-                if head == p {
-                    self.makelink(&self.base_dir, &self.head_link, None::<&Path>)?;
-                } else {
-                    error_ret!("entry has no prev but is not head: {:?}", path);
-                }
+            if let Some(ref prev) = prev {
+                self.makelink(&self.base_dir, &self.tail_link, Some(prev))?;
+                self.makelink(prev, Path::new("next"), None::<&Path>)?;
+            } else if head == p {
+                self.makelink(&self.base_dir, &self.head_link, None::<&Path>)?;
             } else {
-                self.makelink(&self.base_dir, &self.tail_link, prev.as_ref())?;
-                self.makelink(prev.as_ref().unwrap(), Path::new("next"), None::<&Path>)?;
+                error_ret!("entry has no prev but is not head: {:?}", path);
             }
         } else if next.is_none() {
             error_ret!("entry has no next but is not tail: {:?}", path);
         }
 
-        if next.is_some() && prev.is_some() {
-            self.makelink(next.as_ref().unwrap(), Path::new("prev"), prev.as_ref())?;
-            self.makelink(prev.as_ref().unwrap(), Path::new("next"), next.as_ref())?;
+        if let (Some(ref next), Some(ref prev)) = (next, prev) {
+            self.makelink(next, Path::new("prev"), Some(prev))?;
+            self.makelink(prev, Path::new("next"), Some(next))?;
         }
 
         self.makelink(path, Path::new("next"), None::<&Path>)?;

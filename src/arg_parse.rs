@@ -125,7 +125,7 @@ impl BackfsSettings {
                 } else if arg == "-d" || arg == "--debug" {
                     options.push(OsString::from("foreground"));
                     options.push(OsString::from("verbose"));
-                } else if arg.starts_with(&"-") {
+                } else if arg.starts_with("-") {
                     println!("unrecognized option \"{:?}\"", arg);
                     options.push(OsString::from("help"));
                     break;

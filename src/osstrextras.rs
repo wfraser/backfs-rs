@@ -75,7 +75,7 @@ impl AsBytes for OsStr {
     }
 }
 
-impl AsBytes for OsString {
+impl AsBytes for &OsString {
     fn as_bytes_ext(&self) -> &[u8] {
         self.as_bytes()
     }
@@ -83,39 +83,9 @@ impl AsBytes for OsString {
 
 pub trait OsStrExtras {
     fn is_empty(&self) -> bool;
-    fn starts_with(&self, s: &AsBytes) -> bool;
+    fn starts_with(&self, s: impl AsBytes) -> bool;
     fn split(&self, pat: u8) -> Split;
     fn splitn(&self, count: usize, pat: u8) -> SplitN;
-}
-
-impl OsStrExtras for OsString {
-    fn is_empty(&self) -> bool {
-        self.as_os_str() == OsStr::new("")
-    }
-
-    fn starts_with(&self, s: &AsBytes) -> bool {
-        self.as_bytes().starts_with(s.as_bytes_ext())
-    }
-
-    fn split(&self, pat: u8) -> Split {
-        Split {
-            string: self.as_bytes(),
-            sep: pat,
-            position: 0,
-        }
-    }
-
-    fn splitn(&self, count: usize, pat: u8) -> SplitN {
-        SplitN {
-            split: Split {
-                string: self.as_bytes(),
-                sep: pat,
-                position: 0,
-            },
-            count: 0,
-            max: count,
-        }
-    }
 }
 
 impl OsStrExtras for OsStr {
@@ -123,7 +93,7 @@ impl OsStrExtras for OsStr {
         self == OsStr::new("")
     }
 
-    fn starts_with(&self, s: &AsBytes) -> bool {
+    fn starts_with(&self, s: impl AsBytes) -> bool {
         self.as_bytes().starts_with(s.as_bytes_ext())
     }
 

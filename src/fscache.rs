@@ -216,7 +216,7 @@ where
         Ok(())
     }
 
-    #[allow(clippy::cyclomatic_complexity)] // FIXME: split this up into smaller pieces
+    #[allow(clippy::cognitive_complexity)] // FIXME: split this up into smaller pieces
     fn fetch<F>(&self, path: &OsStr, offset: u64, size: u64, file: &mut F, mtime: i64)
             -> io::Result<Vec<u8>>
             where F: Read + Seek
