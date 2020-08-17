@@ -78,7 +78,7 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
 
     fn read_next_bucket_number(&self) -> io::Result<u64> {
         let path = PathBuf::from(&self.buckets_dir).join("next_bucket_number");
-        utils::read_number_file(&path, Some(0u64)).and_then(|r| Ok(r.unwrap()))
+        utils::read_number_file(&path, Some(0u64)).map(|r| r.unwrap())
     }
 
     fn write_next_bucket_number(&self, bucket_number: u64) -> io::Result<()> {
@@ -126,7 +126,7 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
 
             let len = match fs::File::open(&path) {
                 Ok(file) => {
-                    trylog!(file.metadata().and_then(|m| Ok(m.len())),
+                    trylog!(file.metadata().map(|m| m.len()),
                             "failed to get data file metadata from {:?}", path)
                 },
                 Err(e) => {

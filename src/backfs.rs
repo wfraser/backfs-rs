@@ -165,7 +165,7 @@ impl BackFS {
         utils::create_dir_and_check_access(&buckets_dir).unwrap();
         let used_list = FSLL::new(&buckets_dir, "head", "tail");
         let free_list = FSLL::new(&buckets_dir, "free_head", "free_tail");
-        let store = FSCacheBucketStore::new(buckets_dir.clone(), used_list, free_list,
+        let store = FSCacheBucketStore::new(buckets_dir, used_list, free_list,
                                             settings.block_size, max_bytes);
 
         let uid = unsafe { libc::getuid() };
@@ -411,8 +411,6 @@ impl FilesystemMT for BackFS {
 
                     let entry_path = PathBuf::from(path).join(&name);
 
-                    const DT_UNKNOWN: u8 = 0; // pending inclusion in libc
-
                     let filetype = match entry.d_type {
                         libc::DT_DIR => FileType::Directory,
                         libc::DT_REG => FileType::RegularFile,
@@ -421,12 +419,12 @@ impl FilesystemMT for BackFS {
                         libc::DT_CHR => FileType::CharDevice,
                         libc::DT_FIFO => FileType::NamedPipe,
                         libc::DT_SOCK => FileType::Socket,
-                        DT_UNKNOWN | _ => {
+                        _ => {
                             // The directory entry has no file type info included. Do an lstat to
                             // get it. Also do this for unrecognized values before failing out,
                             // just in case lstat gives something we recognize.
                             let real_path = self.real_path(&entry_path);
-                            if entry.d_type != DT_UNKNOWN {
+                            if entry.d_type != libc::DT_UNKNOWN {
                                 warn!("unrecognized dirent.d_type value {:0x} for {:?}",
                                       entry.d_type,
                                       real_path);
