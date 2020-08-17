@@ -1,11 +1,9 @@
 // BackFS Log Output
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 //
 
 use std::boxed::Box;
-use log;
-use syslog;
 use syslog::{Facility, Logger, Severity};
 
 struct Log {
@@ -53,7 +51,7 @@ fn loglevel_to_syslog_severity(level: log::Level) -> Severity {
 }
 
 impl log::Log for Log {
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
         if self.global_filter < metadata.level() {
             return false;
         }
@@ -67,7 +65,7 @@ impl log::Log for Log {
         true
     }
 
-    fn log(&self, record: &log::Record) {
+    fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
             let msg = format!("backfs: {}: {}: {}", record.target(), record.level(), record.args());
             if let Some(ref syslog) = self.syslog {

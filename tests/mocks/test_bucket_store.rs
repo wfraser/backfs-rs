@@ -1,13 +1,11 @@
 // BackFS Filesystem Tests :: Cache Block Store
 //
-// Copyright (c) 2016 by William R. Fraser
+// Copyright (c) 2016-2020 by William R. Fraser
 //
 
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::io;
-
-extern crate libc;
 
 use backfs::bucket_store::*;
 
@@ -42,7 +40,7 @@ impl TestBucketStore {
             used_list: VecDeque::new(),
             free_list: VecDeque::new(),
             used_bytes: 0,
-            max_bytes: max_bytes,
+            max_bytes,
         }
     }
 }

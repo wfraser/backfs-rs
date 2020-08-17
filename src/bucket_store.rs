@@ -1,6 +1,6 @@
 // BackFS Filesystem Cache Block Store
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 //
 
 use std::ffi::{OsStr, OsString};
@@ -8,12 +8,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use fsll::PathLinkedList;
-use link;
-use utils;
-
-use libc;
-use log;
+use crate::fsll::PathLinkedList;
+use crate::link;
+use crate::utils;
 
 pub trait CacheBucketStore {
     fn init<F>(&mut self, delete_handler: F) -> io::Result<()>

@@ -1,6 +1,6 @@
 // FSLL :: Filesystem Linked List
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 //
 
 use std::ffi::{OsStr, OsString};
@@ -9,7 +9,7 @@ use std::fmt::Debug;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use link;
+use crate::link;
 
 macro_rules! error_ret {
     ($($arg:tt)+) => ({

@@ -1,6 +1,6 @@
 // OsStr and OsString extra functions
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 //
 
 use std::ffi::{OsStr, OsString};
@@ -84,8 +84,8 @@ impl AsBytes for &OsString {
 pub trait OsStrExtras {
     fn is_empty(&self) -> bool;
     fn starts_with(&self, s: impl AsBytes) -> bool;
-    fn split(&self, pat: u8) -> Split;
-    fn splitn(&self, count: usize, pat: u8) -> SplitN;
+    fn split(&self, pat: u8) -> Split<'_>;
+    fn splitn(&self, count: usize, pat: u8) -> SplitN<'_>;
 }
 
 impl OsStrExtras for OsStr {
@@ -97,7 +97,7 @@ impl OsStrExtras for OsStr {
         self.as_bytes().starts_with(s.as_bytes_ext())
     }
 
-    fn split(&self, pat: u8) -> Split {
+    fn split(&self, pat: u8) -> Split<'_> {
         Split {
             string: self.as_bytes(),
             sep: pat,
@@ -105,7 +105,7 @@ impl OsStrExtras for OsStr {
         }
     }
 
-    fn splitn(&self, count: usize, pat: u8) -> SplitN {
+    fn splitn(&self, count: usize, pat: u8) -> SplitN<'_> {
         SplitN {
             split: Split {
                 string: self.as_bytes(),

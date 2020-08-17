@@ -3,6 +3,7 @@ name = "backfs"
 version = "0.1.0"
 authors = ["William R. Fraser <wfraser@codewise.org>"]
 build = "build.rs"
+edition = "2018"
 
 [[bin]]
 name = "backfs-rs"

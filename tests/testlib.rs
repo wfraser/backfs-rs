@@ -1,17 +1,15 @@
 // BackFS Component Tests
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 //
 
-// Silence unhelpful clippy lints.
-#![allow(unknown_lints, clone_on_ref_ptr)]
+#![deny(rust_2018_idioms)]
 
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsStr;
 use std::io::Cursor;
 use std::str;
 
-extern crate backfs;
 use backfs::fscache::*;
 use backfs::block_map::*;
 use backfs::bucket_store::*;
@@ -27,7 +25,7 @@ macro_rules! cmp_u8_as_str {
             str::from_utf8($right).unwrap()));
 }
 
-#[allow(type_complexity)]
+#[allow(clippy::type_complexity)]
 fn construct_cache(block_size: u64, max_size: Option<u64>)
         -> (FSCache<Sneaky<TestMap>, TestMap, Sneaky<TestBucketStore>, TestBucketStore>,
             Sneaky<TestMap>,

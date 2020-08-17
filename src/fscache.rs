@@ -1,6 +1,6 @@
 // BackFS Filesystem Cache
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 //
 
 use std::borrow::BorrowMut;
@@ -11,8 +11,8 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
-use block_map::{CacheBlockMap, CacheBlockMapFileResult};
-use bucket_store::CacheBucketStore;
+use crate::block_map::{CacheBlockMap, CacheBlockMapFileResult};
+use crate::bucket_store::CacheBucketStore;
 
 // FSCache has two generic parameters for each of the block map and the bucket store.
 // The {Map, Store} parameters are for a type that can be borrowed to give an implementation of

@@ -1,6 +1,6 @@
 // BackFS Filesystem Cache Block -> Bucket Map
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 //
 
 use std::ffi::{OsStr, OsString};
@@ -8,10 +8,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use link;
-use utils;
+use crate::link;
+use crate::utils;
 
-use libc;
 use walkdir::WalkDir;
 
 macro_rules! trylog {

@@ -1,21 +1,14 @@
 // BackFS Main Entry Point
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 //
 
-#![allow(unknown_lints)]
+#![deny(rust_2018_idioms)]
 
-extern crate backfs;
 use backfs::BackFS;
 use backfs::arg_parse::{self, BackfsSettings};
 
-extern crate fuse_mt;
 use fuse_mt::{FuseMT, FilesystemMT};
-
-extern crate libc;
-extern crate log;
-extern crate log_panics;
-extern crate syslog;
 
 mod log_output;
 

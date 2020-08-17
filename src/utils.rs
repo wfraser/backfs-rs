@@ -1,6 +1,6 @@
 // Miscellaneous BackFS Utility Functions
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 //
 
 use std::ffi::CString;
@@ -10,7 +10,6 @@ use std::io::{self, Read, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::str::FromStr;
-use libc;
 
 pub fn read_number_file<N, P>(path: &P, default: Option<N>) -> io::Result<Option<N>>
         where N: Display + FromStr,

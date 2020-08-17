@@ -1,17 +1,11 @@
 // BackFS Library Crate Module Definitions and External Dependency List
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 //
 
-// Silence unhelpful clippy lints.
-#![allow(clippy::cast_lossless)]
+#![deny(rust_2018_idioms)]
 
-extern crate daemonize;
-extern crate fuse_mt;
-extern crate libc;
 #[macro_use] extern crate log;
-extern crate time;
-extern crate walkdir;
 
 pub mod arg_parse;
 pub mod backfs;
@@ -33,4 +27,4 @@ pub const GIT_REVISION: &str = include_str!(concat!(env!("OUT_DIR"), "/git_rev.t
 #[allow(clippy::unreadable_literal)]
 pub const BUILD_TIME: i64 = include!(concat!(env!("OUT_DIR"), "/build_time.txt"));
 
-pub use backfs::BackFS;
+pub use crate::backfs::BackFS;

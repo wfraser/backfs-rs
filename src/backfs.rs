@@ -1,6 +1,6 @@
 // BackFS FUSE Filesystem implementation
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 //
 
 use std::cmp;
@@ -15,17 +15,16 @@ use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};
 use std::str;
 
-use arg_parse::BackfsSettings;
-use block_map::FSCacheBlockMap;
-use bucket_store::FSCacheBucketStore;
-use fscache::{FSCache, Cache};
-use fsll::FSLL;
-use libc_wrappers;
-use utils;
+use crate::arg_parse::BackfsSettings;
+use crate::block_map::FSCacheBlockMap;
+use crate::bucket_store::FSCacheBucketStore;
+use crate::fscache::{FSCache, Cache};
+use crate::fsll::FSLL;
+use crate::libc_wrappers;
+use crate::utils;
 
 use daemonize::Daemonize;
 use fuse_mt::*;
-use libc;
 use time::Timespec;
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };

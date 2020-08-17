@@ -1,6 +1,6 @@
 // BackFS Filesystem Tests :: Cache Block -> Bucket Map
 //
-// Copyright (c) 2016 by William R. Fraser
+// Copyright (c) 2016-2020 by William R. Fraser
 //
 
 use std::collections::BTreeMap;
@@ -46,7 +46,7 @@ impl CacheBlockMap for TestMap {
     fn set_file_mtime(&mut self, path: &OsStr, mtime: i64) -> io::Result<()> {
         self.map.entry(path.to_os_string())
                            .or_insert(TestMapData{
-                               mtime: mtime,
+                               mtime,
                                blocks: BTreeMap::new(),
                            });
         Ok(())

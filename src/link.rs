@@ -1,12 +1,11 @@
 // Symbolic Link Utilities
 //
-// Copyright 2016-2018 by William R. Fraser
+// Copyright 2016-2020 by William R. Fraser
 
 use std::path::{Component, Path, PathBuf};
 use std::fs;
 use std::io;
 use std::os::unix;
-use libc;
 
 #[test]
 fn test_relpaths() {
