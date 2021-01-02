@@ -84,7 +84,7 @@ impl BackfsSettings {
             backing_fs: OsString::new(),
             cache_size: 0,
             rw: false,
-            block_size: 0x20_000,   // 131072 = 128 KiB
+            block_size: 0x2_0000,   // 131072 = 128 KiB
             foreground: false,
             verbose: false
         };
