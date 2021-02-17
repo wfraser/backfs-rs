@@ -1,6 +1,6 @@
 // BackFS Library Crate Module Definitions and External Dependency List
 //
-// Copyright 2016-2020 by William R. Fraser
+// Copyright 2016-2021 by William R. Fraser
 //
 
 #![deny(rust_2018_idioms)]
@@ -27,4 +27,4 @@ pub const GIT_REVISION: &str = include_str!(concat!(env!("OUT_DIR"), "/git_rev.t
 #[allow(clippy::unreadable_literal)]
 pub const BUILD_TIME: i64 = include!(concat!(env!("OUT_DIR"), "/build_time.txt"));
 
-pub use crate::backfs::BackFS;
+pub use crate::backfs::BackFs;

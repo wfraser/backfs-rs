@@ -1,6 +1,6 @@
 // BackFS Component Tests
 //
-// Copyright 2016-2020 by William R. Fraser
+// Copyright 2016-2021 by William R. Fraser
 //
 
 #![deny(rust_2018_idioms)]
@@ -27,13 +27,13 @@ macro_rules! cmp_u8_as_str {
 
 #[allow(clippy::type_complexity)]
 fn construct_cache(block_size: u64, max_size: Option<u64>)
-        -> (FSCache<Sneaky<TestMap>, TestMap, Sneaky<TestBucketStore>, TestBucketStore>,
+        -> (FsCache<Sneaky<TestMap>, TestMap, Sneaky<TestBucketStore>, TestBucketStore>,
             Sneaky<TestMap>,
             Sneaky<TestBucketStore>) {
     let mut map_sneak = Sneaky::new(TestMap::default());
     let mut store_sneak = Sneaky::new(TestBucketStore::new(max_size));
     let cache = unsafe {
-        FSCache::<_, TestMap, _, TestBucketStore>::new(
+        FsCache::<_, TestMap, _, TestBucketStore>::new(
             map_sneak.sneak(),
             store_sneak.sneak(),
             block_size)
@@ -45,7 +45,7 @@ fn construct_cache(block_size: u64, max_size: Option<u64>)
 fn test_fscache_init() {
     let map = TestMap::default();
     let store = TestBucketStore::new(Some(100));
-    let cache = FSCache::new(map, store, 10);
+    let cache = FsCache::new(map, store, 10);
     assert!(cache.init().is_ok());
 }
 

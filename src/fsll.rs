@@ -1,6 +1,6 @@
 // FSLL :: Filesystem Linked List
 //
-// Copyright 2016-2020 by William R. Fraser
+// Copyright 2016-2021 by William R. Fraser
 //
 
 use std::ffi::{OsStr, OsString};
@@ -19,7 +19,7 @@ macro_rules! error_ret {
     });
 }
 
-pub struct FSLL {
+pub struct Fsll {
     base_dir: OsString,
     head_link: OsString,
     tail_link: OsString,
@@ -34,13 +34,13 @@ pub trait PathLinkedList {
     fn disconnect<T: AsRef<Path> + ?Sized + Debug>(&self, path: &T) -> io::Result<()>;
 }
 
-impl FSLL {
+impl Fsll {
     pub fn new<P1, P2, P3>(base_dir: &P1, head_link: &P2, tail_link: &P3) -> Self
         where P1: AsRef<OsStr> + ?Sized,
               P2: AsRef<OsStr> + ?Sized,
               P3: AsRef<OsStr> + ?Sized,
     {
-        FSLL {
+        Self {
             base_dir: OsString::from(base_dir),
             head_link: OsString::from(head_link),
             tail_link: OsString::from(tail_link),
@@ -95,7 +95,7 @@ impl FSLL {
     }
 }
 
-impl PathLinkedList for FSLL {
+impl PathLinkedList for Fsll {
     fn is_empty(&self) -> bool {
         self.getlink(&self.base_dir, &self.head_link).unwrap().is_none()
             && self.getlink(&self.base_dir, &self.tail_link).unwrap().is_none()

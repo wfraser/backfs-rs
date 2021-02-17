@@ -1,6 +1,6 @@
 // Symbolic Link Utilities
 //
-// Copyright 2016-2020 by William R. Fraser
+// Copyright 2016-2021 by William R. Fraser
 
 use std::path::{Component, Path, PathBuf};
 use std::fs;
@@ -137,7 +137,7 @@ fn test_resolve_path() {
 
 /// Given a reference path relative to some unspecified base path, and a path assumed to be
 /// relative to the reference, returns the second, altered so as to be relative to the base path.
-fn resolve_path(mut reference: PathBuf, path: &PathBuf) -> PathBuf {
+fn resolve_path(mut reference: PathBuf, path: &Path) -> PathBuf {
     reference.pop(); // remove the file name
     for c in path.components() {
         if c == Component::ParentDir {

@@ -1,11 +1,11 @@
 // BackFS Main Entry Point
 //
-// Copyright 2016-2020 by William R. Fraser
+// Copyright 2016-2021 by William R. Fraser
 //
 
 #![deny(rust_2018_idioms)]
 
-use backfs::BackFS;
+use backfs::BackFs;
 use backfs::arg_parse::{self, BackfsSettings};
 
 use fuse_mt::{FuseMT, FilesystemMT};
@@ -78,11 +78,11 @@ fn main() {
             options.push(OsStr::new("--version"));
         }
 
-        struct DummyFS;
-        impl fuse_mt::FilesystemMT for DummyFS {
+        struct DummyFs;
+        impl fuse_mt::FilesystemMT for DummyFs {
         }
 
-        mount_and_exit(DummyFS, 1, &Path::new("."), &options);
+        mount_and_exit(DummyFs, 1, &Path::new("."), &options);
     } else {
         if settings.cache_size != 0 && settings.cache_size < settings.block_size {
             println!("Invalid options: the max cache size cannot be less than the block size.");
@@ -167,7 +167,7 @@ fn main() {
     }
 
     let mountpoint = PathBuf::from(&settings.mount_point);
-    let backfs = BackFS::new(settings);
+    let backfs = BackFs::new(settings);
 
     mount_and_exit(backfs, 1, &mountpoint, &fuse_args.as_deref()[..]);
 }

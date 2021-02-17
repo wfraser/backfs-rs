@@ -1,6 +1,6 @@
 // BackFS Filesystem Cache Block Store
 //
-// Copyright 2016-2020 by William R. Fraser
+// Copyright 2016-2021 by William R. Fraser
 //
 
 use std::ffi::{OsStr, OsString};
@@ -28,7 +28,7 @@ pub trait CacheBucketStore {
     fn get_size(&self, bucket_path: &OsStr) -> io::Result<u64>;
 }
 
-pub struct FSCacheBucketStore<LL: PathLinkedList> {
+pub struct FsCacheBucketStore<LL: PathLinkedList> {
     buckets_dir: OsString,
     used_list: LL,
     free_list: LL,
@@ -59,10 +59,10 @@ macro_rules! trylog {
     }
 }
 
-impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
+impl<LL: PathLinkedList> FsCacheBucketStore<LL> {
     pub fn new(buckets_dir: OsString, used_list: LL, free_list: LL, block_size: u64, max_bytes: Option<u64>)
-            -> FSCacheBucketStore<LL> {
-        FSCacheBucketStore {
+            -> Self {
+        Self {
             buckets_dir,
             used_list,
             free_list,
@@ -180,7 +180,7 @@ impl<LL: PathLinkedList> FSCacheBucketStore<LL> {
     }
 }
 
-impl<LL: PathLinkedList> CacheBucketStore for FSCacheBucketStore<LL> {
+impl<LL: PathLinkedList> CacheBucketStore for FsCacheBucketStore<LL> {
     fn init<F>(&mut self, mut delete_handler: F) -> io::Result<()>
             where F: FnMut(&OsStr) -> io::Result<()> {
         self.next_bucket_number = self.read_next_bucket_number()?;

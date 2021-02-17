@@ -1,6 +1,6 @@
 // BackFS FUSE Filesystem implementation
 //
-// Copyright 2016-2020 by William R. Fraser
+// Copyright 2016-2021 by William R. Fraser
 //
 
 use std::cmp;
@@ -17,10 +17,10 @@ use std::str;
 use std::time::{Duration, SystemTime};
 
 use crate::arg_parse::BackfsSettings;
-use crate::block_map::FSCacheBlockMap;
-use crate::bucket_store::FSCacheBucketStore;
-use crate::fscache::{FSCache, Cache};
-use crate::fsll::FSLL;
+use crate::block_map::FsCacheBlockMap;
+use crate::bucket_store::FsCacheBucketStore;
+use crate::fscache::{FsCache, Cache};
+use crate::fsll::Fsll;
 use crate::libc_wrappers;
 use crate::utils;
 
@@ -45,10 +45,10 @@ fn epoch_time(secs: i64, nanos: u32) -> SystemTime {
     }
 }
 
-pub struct BackFS {
+pub struct BackFs {
     pub settings: BackfsSettings,
-    fscache: FSCache<FSCacheBlockMap, FSCacheBlockMap,
-                     FSCacheBucketStore<FSLL>, FSCacheBucketStore<FSLL>>,
+    fscache: FsCache<FsCacheBlockMap, FsCacheBlockMap,
+                     FsCacheBucketStore<Fsll>, FsCacheBucketStore<Fsll>>,
     uid: u32,
 }
 
@@ -154,8 +154,8 @@ fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
     }
 }
 
-impl BackFS {
-    pub fn new(settings: BackfsSettings) -> BackFS {
+impl BackFs {
+    pub fn new(settings: BackfsSettings) -> Self {
         let max_bytes = if settings.cache_size == 0 {
             None
         } else {
@@ -165,21 +165,21 @@ impl BackFS {
         let map_dir = PathBuf::from(&settings.cache).join("map").into_os_string();
         debug!("map dir: {:?}", map_dir);
         utils::create_dir_and_check_access(&map_dir).unwrap();
-        let map = FSCacheBlockMap::new(map_dir);
+        let map = FsCacheBlockMap::new(map_dir);
 
         let buckets_dir = PathBuf::from(&settings.cache).join("buckets").into_os_string();
         debug!("buckets dir: {:?}", buckets_dir);
         utils::create_dir_and_check_access(&buckets_dir).unwrap();
-        let used_list = FSLL::new(&buckets_dir, "head", "tail");
-        let free_list = FSLL::new(&buckets_dir, "free_head", "free_tail");
-        let store = FSCacheBucketStore::new(buckets_dir, used_list, free_list,
+        let used_list = Fsll::new(&buckets_dir, "head", "tail");
+        let free_list = Fsll::new(&buckets_dir, "free_head", "free_tail");
+        let store = FsCacheBucketStore::new(buckets_dir, used_list, free_list,
                                             settings.block_size, max_bytes);
 
         let uid = unsafe { libc::getuid() };
         debug!("uid = {}", uid);
 
-        BackFS {
-            fscache: FSCache::new(map, store, settings.block_size),
+        Self {
+            fscache: FsCache::new(map, store, settings.block_size),
             settings,
             uid,
         }
@@ -328,13 +328,13 @@ impl BackFS {
     }
 }
 
-impl FilesystemMT for BackFS {
+impl FilesystemMT for BackFs {
     fn init(&self, _req: RequestInfo) -> ResultEmpty {
         debug!("init");
 
         if let Err(e) = self.internal_init() {
             println!("Error initializing BackFS: {}", e);
-            panic!(e);
+            panic!("{}", e);
         }
 
         println!("BackFS: Ready.");
@@ -344,7 +344,7 @@ impl FilesystemMT for BackFS {
             if let Err(e) = Daemonize::new().working_directory("/").start() {
                 let msg = format!("Error forking to background: {}", e);
                 error!("{}", msg);
-                panic!(msg);
+                panic!("{}", msg);
             }
         }
 

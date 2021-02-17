@@ -1,6 +1,6 @@
 // BackFS Filesystem Cache Block -> Bucket Map
 //
-// Copyright 2016-2020 by William R. Fraser
+// Copyright 2016-2021 by William R. Fraser
 //
 
 use std::ffi::{OsStr, OsString};
@@ -56,13 +56,13 @@ pub trait CacheBlockMap {
         where F: FnMut(&OsStr) -> io::Result<()>;
 }
 
-pub struct FSCacheBlockMap {
+pub struct FsCacheBlockMap {
     map_dir: PathBuf,
 }
 
-impl FSCacheBlockMap {
-    pub fn new(map_dir: OsString) -> FSCacheBlockMap {
-        FSCacheBlockMap {
+impl FsCacheBlockMap {
+    pub fn new(map_dir: OsString) -> Self {
+        Self {
             map_dir: PathBuf::from(map_dir),
         }
     }
@@ -113,7 +113,7 @@ impl FSCacheBlockMap {
     }
 }
 
-impl CacheBlockMap for FSCacheBlockMap {
+impl CacheBlockMap for FsCacheBlockMap {
     fn check_file_mtime(&self, path: &OsStr, mtime: i64) -> io::Result<CacheBlockMapFileResult> {
         let mtime_file = self.map_path(path).join("mtime");
         match utils::read_number_file(&mtime_file, None::<i64>) {

@@ -1,6 +1,6 @@
 // BackFS Filesystem Cache
 //
-// Copyright 2016-2020 by William R. Fraser
+// Copyright 2016-2021 by William R. Fraser
 //
 
 use std::borrow::BorrowMut;
@@ -23,7 +23,7 @@ use crate::bucket_store::CacheBucketStore;
 // {Map, Store} be bounded on `BorrowMut<WhateverTrait>` directly, but because the map and block
 // traits both have functions with generic parameters themselves, Rust won't let you make a trait
 // object out of them, and so we have to explicitly parameterize over them. :(
-pub struct FSCache<Map, MapImpl, Store, StoreImpl> {
+pub struct FsCache<Map, MapImpl, Store, StoreImpl> {
     map: RwLock<Map>,
     store: RwLock<Store>,
     block_size: u64,
@@ -63,7 +63,7 @@ pub trait Cache {
     fn count_cached_bytes(&self, path: &OsStr) -> u64;
 }
 
-impl<Map, MapImpl, Store, StoreImpl> FSCache<Map, MapImpl, Store, StoreImpl>
+impl<Map, MapImpl, Store, StoreImpl> FsCache<Map, MapImpl, Store, StoreImpl>
 where
     Map: BorrowMut<MapImpl>,
     MapImpl: CacheBlockMap,
@@ -71,9 +71,9 @@ where
     StoreImpl: CacheBucketStore,
 {
     pub fn new(map: Map, store: Store, block_size: u64)
-        -> FSCache<Map, MapImpl, Store, StoreImpl>
+        -> Self
     {
-        FSCache {
+        Self {
             map: RwLock::new(map),
             store: RwLock::new(store),
             block_size,
@@ -143,7 +143,7 @@ where
     }
 }
 
-impl<Map, MapImpl, Store, StoreImpl> Cache for FSCache<Map, MapImpl, Store, StoreImpl>
+impl<Map, MapImpl, Store, StoreImpl> Cache for FsCache<Map, MapImpl, Store, StoreImpl>
 where
     Map: BorrowMut<MapImpl>,
     MapImpl: CacheBlockMap,
