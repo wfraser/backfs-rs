@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/wfraser/backfs-rs.svg?branch=master)](https://travis-ci.org/wfraser/backfs-rs)
+[![Cargo Checks](https://github.com/wfraser/backfs-rs/workflows/Cargo%20Checks/badge.svg)](https://github.com/wfraser/backfs-rs/actions)
 
 BackFS
 ======
