@@ -14,6 +14,7 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};
 use std::str;
+use std::time::{Duration, SystemTime};
 
 use crate::arg_parse::BackfsSettings;
 use crate::block_map::FSCacheBlockMap;
@@ -25,9 +26,8 @@ use crate::utils;
 
 use daemonize::Daemonize;
 use fuse_mt::*;
-use time::Timespec;
 
-const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
+const TTL: Duration = Duration::from_secs(1);
 
 const BACKFS_CONTROL_FILE_NAME: &str = ".backfs_control";
 const BACKFS_CONTROL_FILE_PATH: &str = "/.backfs_control";
@@ -37,21 +37,13 @@ const BACKFS_VERSION_FILE_PATH: &str = "/.backfs_version";
 
 const BACKFS_CONTROL_FILE_HELP: &str = "commands: test, noop, invalidate <path>, free_orphans\n";
 
-const BACKFS_FAKE_FILE_ATTRS: FileAttr = FileAttr {
-    size: 0,
-    blocks: 0,
-    atime: Timespec { sec: super::BUILD_TIME, nsec: 0 },
-    mtime: Timespec { sec: super::BUILD_TIME, nsec: 0 },
-    ctime: Timespec { sec: super::BUILD_TIME, nsec: 0 },
-    crtime: Timespec { sec: super::BUILD_TIME, nsec: 0 },
-    kind: FileType::RegularFile,
-    perm: 0o000,
-    nlink: 1,
-    uid: 0,
-    gid: 0,
-    rdev: 0,
-    flags: 0,
-};
+fn epoch_time(secs: i64, nanos: u32) -> SystemTime {
+    if secs > 0 {
+        std::time::UNIX_EPOCH + Duration::new(secs as u64, nanos)
+    } else {
+        std::time::UNIX_EPOCH - Duration::new(secs as u64, nanos)
+    }
+}
 
 pub struct BackFS {
     pub settings: BackfsSettings,
@@ -71,16 +63,32 @@ fn backfs_version_str() -> String {
 }
 
 fn backfs_fake_file_attr(path: Option<&str>, uid: u32) -> Option<FileAttr> {
+    let fake_file_attrs = FileAttr {
+        size: 0,
+        blocks: 0,
+        atime: epoch_time(crate::BUILD_TIME, 0),
+        mtime: epoch_time(crate::BUILD_TIME, 0),
+        ctime: epoch_time(crate::BUILD_TIME, 0),
+        crtime: epoch_time(crate::BUILD_TIME, 0),
+        kind: FileType::RegularFile,
+        perm: 0o000,
+        nlink: 1,
+        uid: 0,
+        gid: 0,
+        rdev: 0,
+        flags: 0,
+    };
+
     match path {
         Some(BACKFS_CONTROL_FILE_PATH) => {
-            let mut attr = BACKFS_FAKE_FILE_ATTRS;
+            let mut attr = fake_file_attrs;
             attr.perm = 0o600; // -rw-------
             attr.uid = uid;
             attr.size = BACKFS_CONTROL_FILE_HELP.as_bytes().len() as u64;
             Some(attr)
         },
         Some(BACKFS_VERSION_FILE_PATH) => {
-            let mut attr = BACKFS_FAKE_FILE_ATTRS;
+            let mut attr = fake_file_attrs;
             attr.perm = 0o444; // -r--r--r--
             attr.uid = uid;
             attr.size = backfs_version_str().as_bytes().len() as u64;
@@ -219,10 +227,10 @@ impl BackFS {
         Ok(FileAttr {
             size: stat.st_size as u64,
             blocks: stat.st_blocks as u64,
-            atime: Timespec { sec: stat.st_atime as i64, nsec: stat.st_atime_nsec as i32 },
-            mtime: Timespec { sec: stat.st_mtime as i64, nsec: stat.st_mtime_nsec as i32 },
-            ctime: Timespec { sec: stat.st_ctime as i64, nsec: stat.st_ctime_nsec as i32 },
-            crtime: Timespec { sec: 0, nsec: 0 },
+            atime: epoch_time(stat.st_atime as i64, stat.st_atime_nsec as u32),
+            mtime: epoch_time(stat.st_mtime as i64, stat.st_mtime_nsec as u32),
+            ctime: epoch_time(stat.st_ctime as i64, stat.st_ctime_nsec as u32),
+            crtime: std::time::UNIX_EPOCH,
             kind,
             perm: mode as u16,
             nlink: stat.st_nlink as u32,
