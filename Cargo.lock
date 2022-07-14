@@ -89,6 +89,8 @@ dependencies = [
 [[package]]
 name = "fuse_mt"
 version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6fb32ee97853a470831e058c0340955c9c773c8a1885aab99b37a2d3131fc06"
 dependencies = [
  "fuser",
  "libc",
@@ -99,6 +101,8 @@ dependencies = [
 [[package]]
 name = "fuser"
 version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aef8400a4ea1d18a8302e2952f5137a9a21ab257825ccc7d67db4a8018b89022"
 dependencies = [
  "libc",
  "log 0.4.14",

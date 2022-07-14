@@ -17,16 +17,9 @@ pub struct TestMapData {
     pub blocks: BTreeMap<u64, OsString>,
 }
 
+#[derive(Default)]
 pub struct TestMap {
     pub map: BTreeMap<OsString, TestMapData>,
-}
-
-impl Default for TestMap {
-    fn default() -> TestMap {
-        TestMap {
-            map: BTreeMap::new()
-        }
-    }
 }
 
 impl CacheBlockMap for TestMap {

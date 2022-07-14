@@ -8,7 +8,7 @@ use std::ffi::{CStr, CString, OsStr, OsString};
 use std::fs;
 use std::fs::File;
 use std::io;
-use std::mem;
+use std::mem::{self, transmute};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
@@ -250,7 +250,7 @@ impl BackFs {
         };
 
         let first_space = data_trimmed.iter().position(|x| *x == 0x20)
-                .unwrap_or_else(|| data_trimmed.len());
+                .unwrap_or(data_trimmed.len());
         let (command_bytes, arg_bytes) = data_trimmed.split_at(first_space);
         let command = str::from_utf8(command_bytes).unwrap_or("[invalid utf8]");
 
@@ -661,9 +661,9 @@ impl FilesystemMT for BackFs {
             Ok(Xattr::Data(data))
         } else {
             let mut data = Vec::<u8>::with_capacity(size as usize);
-            unsafe { data.set_len(size as usize) };
-            let nread = libc_wrappers::lgetxattr(real, name.to_owned(), data.as_mut_slice())?;
-            data.truncate(nread);
+            let nread = libc_wrappers::lgetxattr(
+                real, name.to_owned(), unsafe { transmute(data.spare_capacity_mut()) })?;
+            unsafe { data.set_len(nread) };
             Ok(Xattr::Data(data))
         }
     }

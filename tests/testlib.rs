@@ -70,7 +70,7 @@ fn test_fscache_basic(block_size: u64) {
 
     let num_blocks = 1 + ((data_str.len() as u64 - 1) / block_size);
     for i in 0..num_blocks {
-        let bucket: u64 = (&fileblocks.blocks[&i])
+        let bucket: u64 = fileblocks.blocks[&i]
                                       .to_str().unwrap()
                                       .parse().unwrap();
         let cached_data: &Vec<u8> = store.buckets[bucket as usize]

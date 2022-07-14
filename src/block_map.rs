@@ -35,7 +35,7 @@ macro_rules! trylog {
 }
 
 #[must_use]
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub enum CacheBlockMapFileResult {
     Current,
     Stale,
