@@ -351,10 +351,6 @@ impl FilesystemMT for BackFs {
         Ok(())
     }
 
-    fn destroy(&self, _req: RequestInfo) {
-        debug!("destroy");
-    }
-
     fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
         debug!("getattr: {:?}", path);
 

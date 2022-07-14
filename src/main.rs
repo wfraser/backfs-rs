@@ -54,7 +54,10 @@ fn mount_and_exit<FS, P>(fs: FS, num_threads: usize, path: &P, options: &[&OsStr
         panic!("Error redirecting stdin to /dev/null: {}", e);
     }
 
-    fuse_mt::mount(FuseMT::new(fs, num_threads), path, options).unwrap();
+    if let Err(e) = fuse_mt::mount(FuseMT::new(fs, num_threads), path, options) {
+        eprintln!("failed to mount: {}", e);
+        process::exit(-1);
+    }
     process::exit(0);
 }
 
@@ -67,22 +70,21 @@ fn main() {
     }
 
     if settings.help || settings.version {
-        let mut options = Vec::<&OsStr>::new();
-
         if settings.help {
             println!("{}\nFUSE options:", arg_parse::USAGE);
-            options.push(OsStr::new("--help"));
+
+            extern "C" {
+                fn fuse_lowlevel_help();
+            }
+
+            unsafe { fuse_lowlevel_help() };
         } else if settings.version {
-            println!("BackFS version: {} {}\nFuseMT version: {}",
-                     backfs::VERSION, backfs::GIT_REVISION, fuse_mt::VERSION);
-            options.push(OsStr::new("--version"));
+            println!("BackFS version: {} {}", backfs::VERSION, backfs::GIT_REVISION);
+            println!("FuseMT version: {}", backfs::FUSEMT_VERSION);
+            println!("fuser version: {}", backfs::FUSER_VERSION);
         }
 
-        struct DummyFs;
-        impl fuse_mt::FilesystemMT for DummyFs {
-        }
-
-        mount_and_exit(DummyFs, 1, &Path::new("."), &options);
+        process::exit(1);
     } else {
         if settings.cache_size != 0 && settings.cache_size < settings.block_size {
             println!("Invalid options: the max cache size cannot be less than the block size.");

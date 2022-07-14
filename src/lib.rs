@@ -27,4 +27,7 @@ pub const GIT_REVISION: &str = include_str!(concat!(env!("OUT_DIR"), "/git_rev.t
 #[allow(clippy::unreadable_literal)]
 pub const BUILD_TIME: i64 = include!(concat!(env!("OUT_DIR"), "/build_time.txt"));
 
+pub const FUSEMT_VERSION: &str = include!(concat!(env!("OUT_DIR"), "/fusemt_ver.txt"));
+pub const FUSER_VERSION: &str = include!(concat!(env!("OUT_DIR"), "/fuser_ver.txt"));
+
 pub use crate::backfs::BackFs;
