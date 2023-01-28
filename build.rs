@@ -1,10 +1,9 @@
-extern crate time;
-
 use std::env;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn output_or(cmd: &mut Command, s: &str) -> String {
     match cmd.output() {
@@ -31,7 +30,8 @@ fn main() {
     write!(git_rev_file, "{} {}", git_rev.trim(),
             git_branch.trim()).unwrap();
 
-    write!(build_time_file, "{}", time::now().to_utc().to_timespec().sec).unwrap();
+    write!(build_time_file, "{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs())
+        .unwrap();
 
     let cargo = fs::read_to_string("Cargo.lock")
         .expect("failed to read Cargo.lock")

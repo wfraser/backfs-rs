@@ -71,13 +71,17 @@ fn main() {
 
     if settings.help || settings.version {
         if settings.help {
-            println!("{}\nFUSE options:", arg_parse::USAGE);
+            println!("{}", arg_parse::USAGE);
 
-            extern "C" {
-                fn fuse_lowlevel_help();
+            if cfg!(not(target_os = "macos")) {
+                println!("\nFUSE options:");
+
+                extern "C" {
+                    fn fuse_lowlevel_help();
+                }
+
+                unsafe { fuse_lowlevel_help() };
             }
-
-            unsafe { fuse_lowlevel_help() };
         } else if settings.version {
             println!("BackFS version: {} {}", backfs::VERSION, backfs::GIT_REVISION);
             println!("FuseMT version: {}", backfs::FUSEMT_VERSION);
