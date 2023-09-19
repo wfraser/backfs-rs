@@ -92,15 +92,15 @@ pub fn read_number_file<N, P>(path: &P, default: Option<N>) -> io::Result<Option
     }
 }
 
-pub fn write_number_file<N, P>(path: &P, number: &N) -> io::Result<()>
+pub fn write_number_file<N, P>(path: P, number: &N) -> io::Result<()>
     where N: Display + FromStr,
-          P: AsRef<Path> + ?Sized + Debug
+          P: AsRef<Path> + Debug,
 {
     match OpenOptions::new()
                       .write(true)
                       .truncate(true)
                       .create(true)
-                      .open(&path) {
+                      .open(path.as_ref()) {
         Ok(mut file) => {
             if let Err(e) = write!(file, "{}", number) {
                 error!("write_number_file: error writing to {:?}: {}", path, e);
@@ -115,11 +115,11 @@ pub fn write_number_file<N, P>(path: &P, number: &N) -> io::Result<()>
     Ok(())
 }
 
-pub fn create_dir_and_check_access<T>(path: &T) -> io::Result<()>
-    where T: AsRef<Path> + ?Sized + Debug
+pub fn create_dir_and_check_access<T>(path: T) -> io::Result<()>
+    where T: AsRef<Path> + Debug,
 {
     let path = path.as_ref();
-    if let Err(e) = fs::create_dir(&path) {
+    if let Err(e) = fs::create_dir(path) {
         // Already existing is fine.
         if e.raw_os_error() != Some(libc::EEXIST) {
             error!("create_dir_and_check_access: unable to create {:?}: {}", path, e);

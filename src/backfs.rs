@@ -143,11 +143,11 @@ fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
 #[cfg(target_os = "linux")]
 fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
     Statfs {
-        blocks: statfs.f_blocks as u64,
-        bfree: statfs.f_bfree as u64,
-        bavail: statfs.f_bavail as u64,
-        files: statfs.f_files as u64,
-        ffree: statfs.f_ffree as u64,
+        blocks: statfs.f_blocks,
+        bfree: statfs.f_bfree,
+        bavail: statfs.f_bavail,
+        files: statfs.f_files,
+        ffree: statfs.f_ffree,
         bsize: statfs.f_bsize as u32,
         namelen: statfs.f_namelen as u32,
         frsize: statfs.f_frsize as u32,
@@ -541,7 +541,7 @@ impl FilesystemMT for BackFs {
         let mut real_file = unsafe { File::from_raw_fd(fh as libc::c_int) };
 
         let mtime = match real_file.metadata() {
-            Ok(metadata) => metadata.mtime() as i64,
+            Ok(metadata) => metadata.mtime(),
             Err(e) => {
                 error!("unable to get metadata from {:?}: {}", path, e);
                 return result(Err(e.raw_os_error().unwrap()));

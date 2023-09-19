@@ -80,7 +80,7 @@ impl<LL: PathLinkedList> FsCacheBucketStore<LL> {
 
     fn write_next_bucket_number(&self, bucket_number: u64) -> io::Result<()> {
         let path = PathBuf::from(&self.buckets_dir).join("next_bucket_number");
-        utils::write_number_file(&path, &bucket_number)
+        utils::write_number_file(path, &bucket_number)
     }
 
     fn for_each_bucket<F>(&self, mut handler: F) -> io::Result<()>
@@ -332,7 +332,7 @@ impl<LL: PathLinkedList> CacheBucketStore for FsCacheBucketStore<LL> {
             Ok(metadata) => {
                 trylog!(fs::remove_file(&data_path),
                         "error removing bucket data file {:?}", &data_path);
-                metadata.len() as u64
+                metadata.len()
             },
             Err(e) => {
                 debug!("error getting data file metadata of {:?}: {}", &data_path, e);
@@ -398,7 +398,7 @@ impl<LL: PathLinkedList> CacheBucketStore for FsCacheBucketStore<LL> {
 
     fn get_size(&self, bucket_path: &OsStr) -> io::Result<u64> {
         let data_path = PathBuf::from(bucket_path).join("data");
-        let metadata = fs::metadata(&data_path)?;
+        let metadata = fs::metadata(data_path)?;
         Ok(metadata.len())
     }
 }

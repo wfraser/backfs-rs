@@ -106,7 +106,7 @@ pub fn makelink<T: AsRef<Path> + ?Sized,
     if let Some(target_path) = target {
         // target is relative to the base dir. Need to fix it up to be relative to link_path.
         let target_adjusted = make_path_relative_to(&link_path, target_path);
-        unix::fs::symlink(&target_adjusted, &link_path)
+        unix::fs::symlink(target_adjusted, &link_path)
     } else {
         Ok(())
     }

@@ -4,12 +4,13 @@
 //
 
 use std::boxed::Box;
-use syslog::{Facility, Logger, Severity};
+use std::sync::Mutex;
+use syslog::{Facility, Formatter3164, Logger, LoggerBackend};
 
 struct Log {
     global_filter: log::LevelFilter,
     target_filter: Vec<(String, log::LevelFilter)>,
-    syslog: Option<Box<Logger>>,
+    syslog: Option<Mutex<Logger<LoggerBackend, Formatter3164>>>,
 }
 
 pub fn init(global_filter: log::LevelFilter,
@@ -19,9 +20,16 @@ pub fn init(global_filter: log::LevelFilter,
 {
     log::set_max_level(global_filter);
 
+    let formatter = Formatter3164 {
+        facility: Facility::LOG_USER,
+        process: "backfs".into(),
+        hostname: None,
+        pid: 0,
+    };
+
     let syslog = if use_syslog {
-        match syslog::unix(Facility::LOG_USER) {
-            Ok(writer) => Some(writer),
+        match syslog::unix(formatter) {
+            Ok(writer) => Some(Mutex::new(writer)),
             Err(e) => {
                 println!("Error opening connection to syslog: {}", e);
                 println!("Logging disabled!");
@@ -39,25 +47,14 @@ pub fn init(global_filter: log::LevelFilter,
     }))
 }
 
-fn loglevel_to_syslog_severity(level: log::Level) -> Severity {
-    #[allow(clippy::match_same_arms)]
-    match level {
-        log::Level::Error => Severity::LOG_ERR,
-        log::Level::Warn  => Severity::LOG_WARNING,
-        log::Level::Info  => Severity::LOG_INFO,
-        log::Level::Debug => Severity::LOG_DEBUG,
-        log::Level::Trace => Severity::LOG_DEBUG,
-    }
-}
-
 impl log::Log for Log {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
         if self.global_filter < metadata.level() {
             return false;
         }
 
-        for &(ref target, ref filter) in &self.target_filter {
-            if metadata.target() == target && *filter < metadata.level() {
+        for (target, filter) in &self.target_filter {
+            if metadata.target() == target && filter < &metadata.level() {
                 return false;
             }
         }
@@ -67,12 +64,19 @@ impl log::Log for Log {
 
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
-            let msg = format!("backfs: {}: {}: {}", record.target(), record.level(), record.args());
             if let Some(ref syslog) = self.syslog {
-                let severity = loglevel_to_syslog_severity(record.level());
-                let _errors_ignored = syslog.send(severity, &msg);
+                let mut syslog = syslog.lock().unwrap();
+                let msg = format!("{}: {}", record.target(), record.args());
+                use log::Level::*;
+                let _ = match record.level() {
+                    Error => syslog.err(msg),
+                    Warn => syslog.warning(msg),
+                    Info => syslog.info(msg),
+                    Debug => syslog.debug(msg),
+                    Trace => syslog.debug(msg),
+                };
             } else {
-                println!("{}", msg);
+                println!("{}: {}: {}", record.target(), record.level(), record.args());
             }
         }
     }

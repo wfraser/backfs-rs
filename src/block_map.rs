@@ -183,9 +183,9 @@ impl CacheBlockMap for FsCacheBlockMap {
     }
 
     fn unmap_block(&mut self, map_block_path: &OsStr) -> io::Result<()> {
-        debug!("unmapping {:?}", &map_block_path);
+        debug!("unmapping {:?}", map_block_path);
 
-        trylog!(fs::remove_file(&map_block_path),
+        trylog!(fs::remove_file(map_block_path),
                 "unable to remove map block link {:?}", map_block_path);
 
         let mut parent = PathBuf::from(map_block_path);

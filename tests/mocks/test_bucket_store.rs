@@ -62,9 +62,7 @@ impl CacheBucketStore for TestBucketStore {
             where F: FnMut(&OsStr) -> io::Result<()> {
         while self.max_bytes.is_some() && self.used_bytes + data.len() as u64 > self.max_bytes.unwrap() {
             let (bucket_path, _) = self.delete_something().unwrap();
-            if let Err(e) = delete_handler(&bucket_path) {
-                return Err(e);
-            }
+            delete_handler(&bucket_path)?;
         }
 
         let index = if self.free_list.is_empty() {
@@ -107,7 +105,7 @@ impl CacheBucketStore for TestBucketStore {
         let bucket = &mut self.buckets[number];
         let n = bucket.data.as_ref().unwrap().len() as u64;
         bucket.data = None;
-        let parent = ::std::mem::replace(&mut bucket.parent, None);
+        let parent = bucket.parent.take();
 
         self.used_bytes -= n;
         Ok((parent.unwrap(), n))
