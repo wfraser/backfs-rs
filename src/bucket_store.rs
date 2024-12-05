@@ -104,7 +104,7 @@ impl<LL: PathLinkedList> FsCacheBucketStore<LL> {
             }
 
             let mut path: OsString = self.buckets_dir.clone();
-            path.push(&OsString::from("/"));
+            path.push(OsString::from("/"));
             path.push(entry.file_name());
 
             if let Err(e) = handler(path.as_os_str()) {
@@ -306,6 +306,7 @@ impl<LL: PathLinkedList> CacheBucketStore for FsCacheBucketStore<LL> {
             OpenOptions::new()
                         .write(true)
                         .create(true)
+                        .truncate(true)
                         .open(&data_path),
             "put: error opening data file {:?}", data_path
         );

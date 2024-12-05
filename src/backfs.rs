@@ -8,7 +8,7 @@ use std::ffi::{CStr, CString, OsStr, OsString};
 use std::fs;
 use std::fs::File;
 use std::io;
-use std::mem::{self, transmute};
+use std::mem;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
@@ -206,7 +206,7 @@ impl BackFs {
             libc_wrappers::lstat(real)
         };
 
-        let stat = result.map_err(|errno| {
+        let stat = result.inspect_err(|&errno| {
             let msg = format!("lstat: {:?}: {}", path, io::Error::from_raw_os_error(errno));
             if errno == libc::ENOENT {
                 // avoid being overly noisy
@@ -214,7 +214,6 @@ impl BackFs {
             } else {
                 error!("{}", msg);
             }
-            errno
         })?;
 
         let kind = mode_to_filetype(stat.st_mode)?;
@@ -359,14 +358,13 @@ impl FilesystemMT for BackFs {
         }
 
         let attr = self.stat_real(&path, fh)
-            .map_err(|errno| {
+            .inspect_err(|&errno| {
                 let msg = format!("getattr: {:?}: {}", path, io::Error::from_raw_os_error(errno));
                 if errno == libc::ENOENT {
                     debug!("{}", msg);
                 } else {
                     error!("{}", msg);
                 }
-                errno
             })?;
 
         Ok((TTL, attr))
@@ -559,7 +557,7 @@ impl FilesystemMT for BackFs {
 
         // Release control of the file descriptor, so it is not closed when this function
         // returns.
-        real_file.into_raw_fd();
+        let _ = real_file.into_raw_fd();
 
         ret
     }
@@ -662,7 +660,7 @@ impl FilesystemMT for BackFs {
         } else {
             let mut data = Vec::<u8>::with_capacity(size as usize);
             let nread = libc_wrappers::lgetxattr(
-                real, name.to_owned(), unsafe { transmute(data.spare_capacity_mut()) })?;
+                real, name.to_owned(), data.spare_capacity_mut())?;
             unsafe { data.set_len(nread) };
             Ok(Xattr::Data(data))
         }

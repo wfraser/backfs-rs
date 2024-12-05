@@ -63,7 +63,7 @@ pub trait AsBytes {
     fn as_bytes_ext(&self) -> &[u8];
 }
 
-impl<'a> AsBytes for &'a str {
+impl AsBytes for &str {
     fn as_bytes_ext(&self) -> &[u8] {
         self.as_bytes()
     }

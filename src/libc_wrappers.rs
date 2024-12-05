@@ -5,7 +5,7 @@
 
 use std::ffi::{CString, OsString};
 use std::io;
-use std::mem;
+use std::mem::{self, MaybeUninit};
 use std::ptr;
 use std::os::unix::ffi::OsStringExt;
 
@@ -150,7 +150,7 @@ pub fn llistxattr(path: OsString, buf: &mut [u8]) -> Result<usize, libc::c_int> 
     }
 }
 
-pub fn lgetxattr(path: OsString, name: OsString, buf: &mut [u8]) -> Result<usize, libc::c_int> {
+pub fn lgetxattr(path: OsString, name: OsString, buf: &mut [MaybeUninit<u8>]) -> Result<usize, libc::c_int> {
     let path_c = into_cstring!(path, "lgetxattr");
     let name_c = into_cstring!(name, "lgetxattr");
 

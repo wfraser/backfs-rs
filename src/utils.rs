@@ -36,6 +36,7 @@ pub fn read_number_file<N, P>(path: &P, default: Option<N>) -> io::Result<Option
                 .read(true)
                 .write(true)
                 .create(true)
+                .truncate(true)
                 .open(path)
                 .map_err(|e| {
                     error!("read_number_file: error creating file {:?}: {}", path, e);

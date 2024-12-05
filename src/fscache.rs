@@ -8,7 +8,7 @@ use std::ffi::OsStr;
 use std::fmt::Debug;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::marker::PhantomData;
-use std::mem::transmute;
+use std::mem::{transmute, MaybeUninit};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
@@ -89,7 +89,7 @@ where
         let map = self.map.read().unwrap();
         let store = self.store.read().unwrap();
 
-        let bucket_path = match { (*map).borrow().get_block(path, block) } {
+        let bucket_path = match (*map).borrow().get_block(path, block) {
             Ok(Some(bucket_path)) => bucket_path,
             Ok(None) => {
                 return Ok(None)
@@ -100,7 +100,7 @@ where
             }
         };
 
-        match { (*store).borrow().get(&bucket_path) } {
+        match (*store).borrow().get(&bucket_path) {
             Ok(data) => Ok(Some(data)),
             Err(e) => {
                 error!("error reading cached data for block {} of {:?}: {}", block, path, e);
@@ -174,7 +174,7 @@ where
         (*self.map.write().unwrap())
             .borrow_mut()
             .invalidate_path(path.as_os_str(), |bucket_path| {
-                match { (*store).borrow_mut().free_bucket(bucket_path) } {
+                match (*store).borrow_mut().free_bucket(bucket_path) {
                     Ok(n) => {
                         info!("freed {} bytes from bucket {:?}", n, bucket_path);
                         Ok(())
@@ -287,7 +287,9 @@ where
                     // TODO: skip this when doing contiguous reads from the file
                     file.seek(SeekFrom::Start(block * self.block_size))?;
 
-                    let nread = file.read(unsafe { transmute(buf.spare_capacity_mut()) })? as u64;
+                    let nread = file.read(unsafe {
+                        transmute::<&mut [MaybeUninit<u8>], &mut [u8]>(buf.spare_capacity_mut())
+                    })? as u64;
                     debug!("read {:#x} bytes", nread);
 
                     unsafe { buf.set_len(nread as usize) };

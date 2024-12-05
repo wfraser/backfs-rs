@@ -7,13 +7,11 @@
 
 use backfs::BackFs;
 use backfs::arg_parse::{self, BackfsSettings};
+use backfs::osstrextras::OsStrExtras;
 
 use fuse_mt::{FuseMT, FilesystemMT};
 
 mod log_output;
-
-mod osstrextras;
-use osstrextras::OsStrExtras;
 
 use std::env;
 use std::ffi::{OsStr, OsString};
