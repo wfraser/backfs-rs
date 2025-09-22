@@ -24,3 +24,7 @@ walkdir = "2.0"
 git = "https://github.com/wfraser/fuse-mt.git"
 version = "0.6"
 #path = "../fuse-mt"
+
+[dependencies.fuser]
+version = "0.16.0"
+features = ["libfuse"]
