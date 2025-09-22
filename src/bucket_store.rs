@@ -195,13 +195,13 @@ impl<LL: PathLinkedList> CacheBucketStore for FsCacheBucketStore<LL> {
                         size,
                         self.bucket_size);
                     error!("{}", msg);
-                    return Err(io::Error::new(io::ErrorKind::Other, msg));
+                    return Err(io::Error::other(msg));
                 }
             },
             Err(e) => {
                 let msg = format!("error reading bucket_size file: {}", e);
                 error!("{}", msg);
-                return Err(io::Error::new(io::ErrorKind::Other, msg));
+                return Err(io::Error::other(msg));
             },
             Ok(None) => unreachable!()
         }

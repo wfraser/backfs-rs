@@ -84,14 +84,14 @@ fn backfs_fake_file_attr(path: Option<&str>, uid: u32) -> Option<FileAttr> {
             let mut attr = fake_file_attrs;
             attr.perm = 0o600; // -rw-------
             attr.uid = uid;
-            attr.size = BACKFS_CONTROL_FILE_HELP.as_bytes().len() as u64;
+            attr.size = BACKFS_CONTROL_FILE_HELP.len() as u64;
             Some(attr)
         },
         Some(BACKFS_VERSION_FILE_PATH) => {
             let mut attr = fake_file_attrs;
             attr.perm = 0o444; // -r--r--r--
             attr.uid = uid;
-            attr.size = backfs_version_str().as_bytes().len() as u64;
+            attr.size = backfs_version_str().len() as u64;
             Some(attr)
         },
         _ => None

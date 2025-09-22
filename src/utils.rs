@@ -76,7 +76,7 @@ pub fn read_number_file<N, P>(path: &P, default: Option<N>) -> io::Result<Option
             Err(e) => {
                 let msg = format!("read_number_file: error interpreting file {:?} as UTF8 string: {}", path, e);
                 error!("{}", msg);
-                return Err(io::Error::new(io::ErrorKind::Other, msg));
+                return Err(io::Error::other(msg));
             }
         };
 
@@ -85,7 +85,7 @@ pub fn read_number_file<N, P>(path: &P, default: Option<N>) -> io::Result<Option
             Err(e) => {
                 let msg = format!("read_number_file: error interpreting file {:?} as number: {:?}", path, e);
                 error!("{}", msg);
-                return Err(io::Error::new(io::ErrorKind::Other, msg));
+                return Err(io::Error::other(msg));
             }
         };
 
