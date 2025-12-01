@@ -35,7 +35,7 @@ fn main() {
 
     let cargo = fs::read_to_string("Cargo.lock")
         .expect("failed to read Cargo.lock")
-        .parse::<toml::Value>()
+        .parse::<toml::Table>()
         .expect("failed to parse Cargo.lock as toml");
 
     for package in cargo.get("package")
