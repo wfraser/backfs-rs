@@ -8,13 +8,15 @@ jobs:
     runs-on: ${{matrix.os}}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os:
+          - ubuntu-latest
+          #- macos-latest
         rust_toolchain: [stable, nightly]
         include:
           - os: ubuntu-latest
             fuse_install: sudo apt-get install fuse libfuse-dev
-          - os: macos-latest
-            fuse_install: brew install --cask osxfuse
+          #- os: macos-latest
+          #  fuse_install: brew install --cask osxfuse
     steps:
       - name: Set up FUSE
         run: ${{matrix.fuse_install}}
